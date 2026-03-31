@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ros2_cli_viz</name>
+  <version>0.1.0</version>
+  <description>CLI visualization tools for ROS 2 topics.</description>
+  <maintainer email="marton@nowtech.hu">nilseuropa</maintainer>
+  <license>apache</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>nowtech_interfaces</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

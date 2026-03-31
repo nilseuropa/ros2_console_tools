@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.10)
+
+project(ros2_cli_viz)
+
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+endif()
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(nowtech_interfaces REQUIRED)
+
+add_executable(semantic_grid_cli_node src/semantic_grid_cli_node.cpp)
+ament_target_dependencies(semantic_grid_cli_node
+  rclcpp
+  nowtech_interfaces
+)
+
+install(TARGETS semantic_grid_cli_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+ament_package()
