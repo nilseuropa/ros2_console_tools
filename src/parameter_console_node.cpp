@@ -185,14 +185,14 @@ public:
     if (has_colors()) {
       start_color();
       use_default_colors();
-      init_pair(kColorFrame, COLOR_CYAN, COLOR_BLACK);
-      init_pair(kColorTitle, COLOR_WHITE, COLOR_BLACK);
+      init_pair(kColorFrame, COLOR_CYAN, -1);
+      init_pair(kColorTitle, COLOR_WHITE, -1);
       init_pair(kColorHeader, COLOR_YELLOW, -1);
       init_pair(kColorSelection, COLOR_BLACK, COLOR_YELLOW);
-      init_pair(kColorStatus, COLOR_GREEN, COLOR_BLACK);
+      init_pair(kColorStatus, COLOR_GREEN, -1);
       init_pair(kColorHelp, COLOR_BLACK, COLOR_CYAN);
-      init_pair(kColorPopup, COLOR_WHITE, COLOR_BLACK);
-      init_pair(kColorInput, COLOR_YELLOW, COLOR_BLACK);
+      init_pair(kColorPopup, COLOR_WHITE, -1);
+      init_pair(kColorInput, COLOR_YELLOW, -1);
       init_pair(kColorDirty, COLOR_RED, -1);
       init_pair(kColorCursor, COLOR_BLACK, COLOR_YELLOW);
     }
