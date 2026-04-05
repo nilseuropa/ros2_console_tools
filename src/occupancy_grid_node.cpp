@@ -263,7 +263,7 @@ void append_terminal_line(
 
 }  // namespace
 
-namespace ros2_cli_viz {
+namespace ros2_console_tools {
 
 class OccupancyGridCliNode : public rclcpp::Node {
 public:
@@ -630,11 +630,11 @@ private:
   rclcpp::TimerBase::SharedPtr render_timer_;
 };
 
-}  // namespace ros2_cli_viz
+}  // namespace ros2_console_tools
 
 int main(int argc, char * argv[]) {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<ros2_cli_viz::OccupancyGridCliNode>();
+  auto node = std::make_shared<ros2_console_tools::OccupancyGridCliNode>();
   rclcpp::spin(node);
   rclcpp::shutdown();
   return 0;

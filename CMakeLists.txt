@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(ros2_cli_viz)
+project(ros2_console_tools)
 
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
