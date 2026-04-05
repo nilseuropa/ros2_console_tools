@@ -213,30 +213,40 @@ struct ParameterEntry {
   std::string edit_buffer;
 };
 
+enum class ViewMode {
+  NodeList,
+  ParameterList,
+};
+
 class ParameterConsoleNode : public rclcpp::Node {
 public:
   explicit ParameterConsoleNode(const std::string & target_node)
   : Node("parameter_console_node"),
-    target_node_(normalize_target_name(this->declare_parameter<std::string>("target_node", target_node))),
-    client_(std::make_shared<rclcpp::AsyncParametersClient>(this, target_node_)) {}
+    target_node_(normalize_target_name(this->declare_parameter<std::string>("target_node", target_node))) {
+    current_view_ = target_node_.empty() ? ViewMode::NodeList : ViewMode::ParameterList;
+    if (!target_node_.empty()) {
+      reset_parameter_client();
+    }
+  }
 
   int run() {
-    if (target_node_.empty()) {
-      RCLCPP_ERROR(this->get_logger(), "target_node parameter or CLI argument is required.");
-      return 1;
-    }
-
     NcursesSession ncurses_session;
-    set_status("Connecting to " + target_node_ + "...");
-
-    if (!client_->wait_for_service(std::chrono::seconds(2))) {
-      set_status("Parameter services for " + target_node_ + " are not available.");
+    refresh_node_list();
+    if (current_view_ == ViewMode::NodeList) {
+      warm_up_node_list();
+      set_status("Choose a node and press Enter.");
     } else {
-      refresh_all();
+      set_status("Connecting to " + target_node_ + "...");
+      if (!client_ || !client_->wait_for_service(std::chrono::seconds(2))) {
+        set_status("Parameter services for " + target_node_ + " are not available.");
+      } else {
+        refresh_all();
+      }
     }
 
     bool running = true;
     while (running && rclcpp::ok()) {
+      maybe_refresh_node_list();
       draw();
       const int key = getch();
       if (key == ERR) {
@@ -262,17 +272,35 @@ private:
         refresh_all();
         return true;
       case KEY_F(3):
-        refresh_selected();
+        if (current_view_ == ViewMode::NodeList) {
+          refresh_node_list();
+        } else {
+          refresh_selected();
+        }
         return true;
+      case 27:
+        if (current_view_ == ViewMode::ParameterList) {
+          switch_to_node_list();
+          return true;
+        }
+        break;
       case '\n':
       case KEY_ENTER:
-        open_popup();
+        if (current_view_ == ViewMode::NodeList) {
+          select_current_node();
+        } else {
+          open_popup();
+        }
         return true;
       default:
         break;
     }
 
-    handle_list_key(key);
+    if (current_view_ == ViewMode::NodeList) {
+      handle_node_list_key(key);
+    } else {
+      handle_list_key(key);
+    }
     return true;
   }
 
@@ -382,6 +410,37 @@ private:
     }
   }
 
+  void handle_node_list_key(int key) {
+    if (node_entries_.empty()) {
+      return;
+    }
+
+    switch (key) {
+      case KEY_UP:
+      case 'k':
+        if (selected_node_index_ > 0) {
+          --selected_node_index_;
+        }
+        break;
+      case KEY_DOWN:
+      case 'j':
+        if (selected_node_index_ + 1 < static_cast<int>(node_entries_.size())) {
+          ++selected_node_index_;
+        }
+        break;
+      case KEY_PPAGE:
+        selected_node_index_ = std::max(0, selected_node_index_ - page_step());
+        break;
+      case KEY_NPAGE:
+        selected_node_index_ = std::min(
+          static_cast<int>(node_entries_.size()) - 1,
+          selected_node_index_ + page_step());
+        break;
+      default:
+        break;
+    }
+  }
+
   int page_step() const {
     int rows = 0;
     int columns = 0;
@@ -409,6 +468,10 @@ private:
   }
 
   void refresh_all() {
+    if (current_view_ == ViewMode::NodeList) {
+      refresh_node_list();
+      return;
+    }
     if (!wait_for_parameter_service()) {
       return;
     }
@@ -463,6 +526,9 @@ private:
   }
 
   void refresh_selected() {
+    if (current_view_ != ViewMode::ParameterList) {
+      return;
+    }
     auto * entry = selected_entry();
     if (entry == nullptr) {
       set_status("No parameter selected.");
@@ -503,6 +569,9 @@ private:
   }
 
   void save_selected() {
+    if (current_view_ != ViewMode::ParameterList) {
+      return;
+    }
     auto * entry = selected_entry();
     if (entry == nullptr) {
       set_status("No parameter selected.");
@@ -585,6 +654,92 @@ private:
     }
   }
 
+  void refresh_node_list() {
+    auto nodes = this->get_node_graph_interface()->get_node_names_and_namespaces();
+    node_entries_.clear();
+    node_entries_.reserve(nodes.size());
+
+    for (const auto & node : nodes) {
+      const std::string full_name = fully_qualified_node_name(node.second, node.first);
+      if (full_name == this->get_fully_qualified_name()) {
+        continue;
+      }
+      node_entries_.push_back(full_name);
+    }
+
+    std::sort(node_entries_.begin(), node_entries_.end());
+    node_entries_.erase(std::unique(node_entries_.begin(), node_entries_.end()), node_entries_.end());
+
+    if (node_entries_.empty()) {
+      selected_node_index_ = 0;
+      set_status("No ROS 2 nodes discovered.");
+      return;
+    }
+
+    selected_node_index_ = std::clamp(selected_node_index_, 0, static_cast<int>(node_entries_.size()) - 1);
+    last_node_refresh_time_ = std::chrono::steady_clock::now();
+    set_status("Loaded " + std::to_string(node_entries_.size()) + " nodes. Press Enter to inspect parameters.");
+  }
+
+  void select_current_node() {
+    if (node_entries_.empty() || selected_node_index_ < 0 || selected_node_index_ >= static_cast<int>(node_entries_.size())) {
+      set_status("No node selected.");
+      return;
+    }
+
+    const std::string candidate_node = node_entries_[static_cast<std::size_t>(selected_node_index_)];
+    auto candidate_client = std::make_shared<rclcpp::AsyncParametersClient>(this, candidate_node);
+    set_status("Connecting to " + candidate_node + "...");
+    if (!candidate_client->wait_for_service(std::chrono::milliseconds(800))) {
+      set_status("Node " + candidate_node + " does not answer parameter services.");
+      return;
+    }
+
+    target_node_ = candidate_node;
+    client_ = std::move(candidate_client);
+    entries_.clear();
+    selected_index_ = 0;
+    list_scroll_ = 0;
+    current_view_ = ViewMode::ParameterList;
+    refresh_all();
+  }
+
+  void switch_to_node_list() {
+    close_popup();
+    current_view_ = ViewMode::NodeList;
+    entries_.clear();
+    selected_index_ = 0;
+    list_scroll_ = 0;
+    refresh_node_list();
+  }
+
+  void reset_parameter_client() {
+    client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, target_node_);
+  }
+
+  void maybe_refresh_node_list() {
+    if (current_view_ != ViewMode::NodeList || popup_open_) {
+      return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_node_refresh_time_ >= std::chrono::seconds(1)) {
+      refresh_node_list();
+    }
+  }
+
+  void warm_up_node_list() {
+    if (!node_entries_.empty()) {
+      return;
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1200);
+    while (node_entries_.empty() && std::chrono::steady_clock::now() < deadline && rclcpp::ok()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      refresh_node_list();
+    }
+  }
+
   std::string lowercase(std::string value) const {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
       return static_cast<char>(std::tolower(character));
@@ -599,6 +754,16 @@ private:
     return "/" + name;
   }
 
+  std::string fully_qualified_node_name(const std::string & ns, const std::string & name) const {
+    if (ns.empty() || ns == "/") {
+      return "/" + name;
+    }
+    if (ns.back() == '/') {
+      return ns + name;
+    }
+    return ns + "/" + name;
+  }
+
   void toggle_bool_buffer(std::string & buffer) {
     const std::string lowered = lowercase(trim(buffer));
     buffer = (lowered == "true" || lowered == "1" || lowered == "yes" || lowered == "on")
@@ -607,6 +772,10 @@ private:
   }
 
   bool wait_for_parameter_service() {
+    if (!client_) {
+      set_status("No target node selected.");
+      return false;
+    }
     if (client_->service_is_ready()) {
       return true;
     }
@@ -660,7 +829,11 @@ private:
     const int content_bottom = std::max(content_top + 1, status_row - 1);
     draw_box(0, 0, content_bottom, columns - 1);
     mvprintw(0, 2, " Parameter Commander ");
-    draw_parameter_list(1, 1, content_bottom - 1, columns - 2);
+    if (current_view_ == ViewMode::NodeList) {
+      draw_node_list(1, 1, content_bottom - 1, columns - 2);
+    } else {
+      draw_parameter_list(1, 1, content_bottom - 1, columns - 2);
+    }
     draw_status_line(status_row, columns);
     draw_help_line(help_row, columns);
     if (popup_open_) {
@@ -686,11 +859,9 @@ private:
   void draw_parameter_list(int top, int left, int bottom, int right) {
     const int visible_rows = std::max(1, bottom - top + 1);
     const int width = right - left + 1;
-    const int name_width = std::max(18, width / 4);
+    const int name_width = std::max(22, width / 3);
     const int value_width = std::max(12, width / 6);
-    const int min_width = 10;
-    const int max_width = 10;
-    const int desc_width = std::max(10, width - name_width - value_width - min_width - max_width - 8);
+    const int desc_width = std::max(10, width - name_width - value_width - 2);
     if (selected_index_ < list_scroll_) {
       list_scroll_ = selected_index_;
     }
@@ -700,8 +871,6 @@ private:
 
     const std::string header = pad_column("Name", name_width) + " "
       + pad_column("Current", value_width) + " "
-      + pad_column("Min", min_width) + " "
-      + pad_column("Max", max_width) + " "
       + pad_column("Descriptor", desc_width);
     attron(COLOR_PAIR(kColorHeader) | A_BOLD);
     mvaddnstr(top, left, header.c_str(), width);
@@ -717,8 +886,6 @@ private:
       const auto & entry = entries_[static_cast<std::size_t>(entry_index)];
       const std::string rendered = pad_column(entry.dirty ? "*" + entry.name : entry.name, name_width) + " "
         + pad_column(summary_value(entry), value_width) + " "
-        + pad_column(parameter_min(entry), min_width) + " "
-        + pad_column(parameter_max(entry), max_width) + " "
         + pad_column(descriptor_summary(entry.descriptor), desc_width);
 
       if (entry_index == selected_index_) {
@@ -726,6 +893,37 @@ private:
       }
       mvaddnstr(top + row, left, rendered.c_str(), width);
       if (entry_index == selected_index_) {
+        attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
+      }
+    }
+  }
+
+  void draw_node_list(int top, int left, int bottom, int right) {
+    const int visible_rows = std::max(1, bottom - top + 1);
+    const int width = right - left + 1;
+    if (selected_node_index_ < node_scroll_) {
+      node_scroll_ = selected_node_index_;
+    }
+    if (selected_node_index_ >= node_scroll_ + visible_rows - 1) {
+      node_scroll_ = selected_node_index_ - visible_rows + 2;
+    }
+
+    attron(COLOR_PAIR(kColorHeader) | A_BOLD);
+    mvaddnstr(top, left, pad_column("Discovered Nodes", width).c_str(), width);
+    attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
+
+    for (int row = 1; row < visible_rows; ++row) {
+      const int entry_index = node_scroll_ + row - 1;
+      mvhline(top + row, left, ' ', width);
+      if (entry_index >= static_cast<int>(node_entries_.size())) {
+        continue;
+      }
+      const std::string rendered = pad_column(node_entries_[static_cast<std::size_t>(entry_index)], width);
+      if (entry_index == selected_node_index_) {
+        attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+      }
+      mvaddnstr(top + row, left, rendered.c_str(), width);
+      if (entry_index == selected_node_index_) {
         attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
       }
     }
@@ -867,10 +1065,14 @@ private:
   }
 
   void draw_help_line(int row, int columns) const {
-    const std::string help =
-      popup_open_
-        ? "F2 Save  F3 Load  Esc Close  F10 Exit"
-        : "Enter Edit  F3 Refresh  F4 Refresh All  F10 Exit";
+    std::string help;
+    if (popup_open_) {
+      help = "F2 Save  F3 Load  Enter Save+Close  Esc Close  F10 Exit";
+    } else if (current_view_ == ViewMode::NodeList) {
+      help = "Enter Select Node  F3 Refresh Nodes  F4 Refresh Nodes  F10 Exit";
+    } else {
+      help = "Enter Edit  F3 Refresh Param  F4 Refresh All  Esc Nodes  F10 Exit";
+    }
     attron(COLOR_PAIR(kColorHelp));
     mvhline(row, 0, ' ', columns);
     mvaddnstr(row, 0, truncate_line(help, columns).c_str(), columns);
@@ -883,7 +1085,12 @@ private:
 
   std::string target_node_;
   std::shared_ptr<rclcpp::AsyncParametersClient> client_;
+  ViewMode current_view_{ViewMode::NodeList};
+  std::vector<std::string> node_entries_;
   std::vector<ParameterEntry> entries_;
+  std::chrono::steady_clock::time_point last_node_refresh_time_{std::chrono::steady_clock::time_point::min()};
+  int selected_node_index_{0};
+  int node_scroll_{0};
   int selected_index_{0};
   int list_scroll_{0};
   bool popup_open_{false};
