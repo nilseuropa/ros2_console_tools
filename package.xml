@@ -3,12 +3,13 @@
 <package format="3">
   <name>ros2_console_tools</name>
   <version>0.1.0</version>
-  <description>CLI visualization tools for ROS 2 topics.</description>
+  <description>Console tools for ROS 2 topics, parameters, and runtime operations.</description>
   <maintainer email="marton@nowtech.hu">nilseuropa</maintainer>
   <license>apache</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>curses</depend>
   <depend>nav_msgs</depend>
   <depend>rclcpp</depend>
 

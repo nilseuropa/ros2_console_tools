@@ -12,6 +12,7 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(Curses REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 
@@ -22,6 +23,17 @@ ament_target_dependencies(occupancy_grid_node
 )
 
 install(TARGETS occupancy_grid_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(parameter_console_node src/parameter_console_node.cpp)
+ament_target_dependencies(parameter_console_node
+  rclcpp
+)
+target_include_directories(parameter_console_node PRIVATE ${CURSES_INCLUDE_DIR})
+target_link_libraries(parameter_console_node ${CURSES_LIBRARIES})
+
+install(TARGETS parameter_console_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
