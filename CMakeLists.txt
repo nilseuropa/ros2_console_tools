@@ -12,16 +12,16 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(nowtech_interfaces REQUIRED)
 
-add_executable(semantic_grid_cli_node src/semantic_grid_cli_node.cpp)
-ament_target_dependencies(semantic_grid_cli_node
+add_executable(occupancy_grid_node src/occupancy_grid_node.cpp)
+ament_target_dependencies(occupancy_grid_node
+  nav_msgs
   rclcpp
-  nowtech_interfaces
 )
 
-install(TARGETS semantic_grid_cli_node
+install(TARGETS occupancy_grid_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

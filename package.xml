@@ -9,8 +9,8 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>nav_msgs</depend>
   <depend>rclcpp</depend>
-  <depend>nowtech_interfaces</depend>
 
   <export>
     <build_type>ament_cmake</build_type>
