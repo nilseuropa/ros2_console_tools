@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <clocale>
 #include <cstdlib>
 #include <memory>
 #include <limits>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -176,6 +178,7 @@ bool software_caret_visible() {
 class NcursesSession {
 public:
   NcursesSession() {
+    std::setlocale(LC_ALL, "");
     initscr();
     cbreak();
     noecho();
@@ -211,6 +214,14 @@ struct ParameterEntry {
   bool has_value{false};
   bool dirty{false};
   std::string edit_buffer;
+};
+
+struct ParameterViewItem {
+  bool is_namespace{false};
+  std::string label;
+  std::string namespace_path;
+  int depth{0};
+  ParameterEntry * entry{nullptr};
 };
 
 enum class ViewMode {
@@ -287,10 +298,9 @@ private:
       case KEY_ENTER:
         if (current_view_ == ViewMode::NodeList) {
           select_current_node();
-        } else {
-          open_popup();
+          return true;
         }
-        return true;
+        break;
       default:
         break;
     }
@@ -377,32 +387,47 @@ private:
   }
 
   void handle_list_key(int key) {
-    if (entries_.empty()) {
+    const auto items = visible_parameter_items();
+    if (items.empty()) {
       return;
     }
 
     switch (key) {
       case KEY_UP:
       case 'k':
-        if (selected_index_ > 0) {
-          --selected_index_;
+        if (selected_parameter_item_index_ > 0) {
+          --selected_parameter_item_index_;
         }
         sync_edit_buffer_from_selected();
         break;
       case KEY_DOWN:
       case 'j':
-        if (selected_index_ + 1 < static_cast<int>(entries_.size())) {
-          ++selected_index_;
+        if (selected_parameter_item_index_ + 1 < static_cast<int>(items.size())) {
+          ++selected_parameter_item_index_;
         }
         sync_edit_buffer_from_selected();
         break;
       case KEY_PPAGE:
-        selected_index_ = std::max(0, selected_index_ - page_step());
+        selected_parameter_item_index_ = std::max(0, selected_parameter_item_index_ - page_step());
         sync_edit_buffer_from_selected();
         break;
       case KEY_NPAGE:
-        selected_index_ = std::min(static_cast<int>(entries_.size()) - 1, selected_index_ + page_step());
+        selected_parameter_item_index_ = std::min(
+          static_cast<int>(items.size()) - 1,
+          selected_parameter_item_index_ + page_step());
         sync_edit_buffer_from_selected();
+        break;
+      case KEY_RIGHT:
+      case 'l':
+        expand_selected_namespace();
+        break;
+      case KEY_LEFT:
+      case 'h':
+        collapse_selected_namespace();
+        break;
+      case '\n':
+      case KEY_ENTER:
+        activate_selected_parameter_item();
         break;
       default:
         break;
@@ -511,12 +536,18 @@ private:
       }
 
       if (entries_.empty()) {
-        selected_index_ = 0;
+        selected_parameter_item_index_ = 0;
         set_status("No parameters found on " + target_node_ + ".");
         return;
       }
 
-      selected_index_ = std::clamp(selected_index_, 0, static_cast<int>(entries_.size()) - 1);
+      const auto items = visible_parameter_items();
+      if (items.empty()) {
+        selected_parameter_item_index_ = 0;
+      } else {
+        selected_parameter_item_index_ = std::clamp(
+          selected_parameter_item_index_, 0, static_cast<int>(items.size()) - 1);
+      }
       sync_edit_buffer_from_selected();
       set_status("Loaded " + std::to_string(entries_.size()) + " parameters from " + target_node_ + ".");
     } catch (const std::exception & exception) {
@@ -697,8 +728,9 @@ private:
     target_node_ = candidate_node;
     client_ = std::move(candidate_client);
     entries_.clear();
-    selected_index_ = 0;
+    selected_parameter_item_index_ = 0;
     list_scroll_ = 0;
+    collapsed_namespaces_.clear();
     current_view_ = ViewMode::ParameterList;
     refresh_all();
   }
@@ -707,7 +739,7 @@ private:
     close_popup();
     current_view_ = ViewMode::NodeList;
     entries_.clear();
-    selected_index_ = 0;
+    selected_parameter_item_index_ = 0;
     list_scroll_ = 0;
     refresh_node_list();
   }
@@ -803,17 +835,93 @@ private:
   }
 
   ParameterEntry * selected_entry() {
-    if (entries_.empty() || selected_index_ < 0 || selected_index_ >= static_cast<int>(entries_.size())) {
+    auto items = visible_parameter_items();
+    if (items.empty()
+      || selected_parameter_item_index_ < 0
+      || selected_parameter_item_index_ >= static_cast<int>(items.size()))
+    {
       return nullptr;
     }
-    return &entries_[static_cast<std::size_t>(selected_index_)];
+    const auto & item = items[static_cast<std::size_t>(selected_parameter_item_index_)];
+    return item.is_namespace ? nullptr : item.entry;
   }
 
   const ParameterEntry * selected_entry() const {
-    if (entries_.empty() || selected_index_ < 0 || selected_index_ >= static_cast<int>(entries_.size())) {
+    auto items = visible_parameter_items();
+    if (items.empty()
+      || selected_parameter_item_index_ < 0
+      || selected_parameter_item_index_ >= static_cast<int>(items.size()))
+    {
       return nullptr;
     }
-    return &entries_[static_cast<std::size_t>(selected_index_)];
+    const auto & item = items[static_cast<std::size_t>(selected_parameter_item_index_)];
+    return item.is_namespace ? nullptr : item.entry;
+  }
+
+  void activate_selected_parameter_item() {
+    auto items = visible_parameter_items();
+    if (items.empty()
+      || selected_parameter_item_index_ < 0
+      || selected_parameter_item_index_ >= static_cast<int>(items.size()))
+    {
+      return;
+    }
+
+    const auto & item = items[static_cast<std::size_t>(selected_parameter_item_index_)];
+    if (item.is_namespace) {
+      collapsed_namespaces_[item.namespace_path] = is_namespace_expanded(item.namespace_path);
+      const auto updated_items = visible_parameter_items();
+      if (!updated_items.empty()) {
+        selected_parameter_item_index_ = std::min(
+          selected_parameter_item_index_, static_cast<int>(updated_items.size()) - 1);
+      }
+      return;
+    }
+
+    open_popup();
+  }
+
+  void expand_selected_namespace() {
+    auto items = visible_parameter_items();
+    if (items.empty()
+      || selected_parameter_item_index_ < 0
+      || selected_parameter_item_index_ >= static_cast<int>(items.size()))
+    {
+      return;
+    }
+    const auto & item = items[static_cast<std::size_t>(selected_parameter_item_index_)];
+    if (!item.is_namespace) {
+      return;
+    }
+    collapsed_namespaces_[item.namespace_path] = false;
+  }
+
+  void collapse_selected_namespace() {
+    auto items = visible_parameter_items();
+    if (items.empty()
+      || selected_parameter_item_index_ < 0
+      || selected_parameter_item_index_ >= static_cast<int>(items.size()))
+    {
+      return;
+    }
+    const auto & item = items[static_cast<std::size_t>(selected_parameter_item_index_)];
+    if (item.is_namespace) {
+      collapsed_namespaces_[item.namespace_path] = true;
+      return;
+    }
+
+    const std::string parent_namespace = parameter_namespace(item.entry->name);
+    if (parent_namespace.empty()) {
+      return;
+    }
+
+    for (std::size_t index = 0; index < items.size(); ++index) {
+      if (items[index].is_namespace && items[index].namespace_path == parent_namespace) {
+        selected_parameter_item_index_ = static_cast<int>(index);
+        collapsed_namespaces_[parent_namespace] = true;
+        return;
+      }
+    }
   }
 
   void draw() {
@@ -827,7 +935,7 @@ private:
     const int content_top = 0;
     const int content_bottom = std::max(content_top + 1, status_row - 1);
     draw_box(0, 0, content_bottom, columns - 1);
-    mvprintw(0, 2, " Parameter Commander ");
+    mvprintw(0, 1, "Parameter Commander ");
     if (current_view_ == ViewMode::NodeList) {
       draw_node_list(1, 1, content_bottom - 1, columns - 2);
     } else {
@@ -856,16 +964,19 @@ private:
   }
 
   void draw_parameter_list(int top, int left, int bottom, int right) {
+    const auto items = visible_parameter_items();
     const int visible_rows = std::max(1, bottom - top + 1);
     const int width = right - left + 1;
     const int name_width = std::max(22, width / 3);
     const int value_width = std::max(12, width / 6);
     const int desc_width = std::max(10, width - name_width - value_width - 2);
-    if (selected_index_ < list_scroll_) {
-      list_scroll_ = selected_index_;
+    const int separator_one_x = left + name_width;
+    const int separator_two_x = left + name_width + 1 + value_width;
+    if (selected_parameter_item_index_ < list_scroll_) {
+      list_scroll_ = selected_parameter_item_index_;
     }
-    if (selected_index_ >= list_scroll_ + visible_rows) {
-      list_scroll_ = selected_index_ - visible_rows + 1;
+    if (selected_parameter_item_index_ >= list_scroll_ + visible_rows) {
+      list_scroll_ = selected_parameter_item_index_ - visible_rows + 1;
     }
 
     const std::string header = pad_column("Name", name_width) + " "
@@ -875,26 +986,199 @@ private:
     mvaddnstr(top, left, header.c_str(), width);
     attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
 
+    attron(COLOR_PAIR(kColorFrame));
+    mvvline(top, separator_one_x, ACS_VLINE, visible_rows);
+    mvvline(top, separator_two_x, ACS_VLINE, visible_rows);
+    attroff(COLOR_PAIR(kColorFrame));
+
     for (int row = 1; row < visible_rows; ++row) {
       const int entry_index = list_scroll_ + row - 1;
-      mvhline(top + row, left, ' ', width);
-      if (entry_index >= static_cast<int>(entries_.size())) {
+      const int row_y = top + row;
+      const bool is_selected = entry_index == selected_parameter_item_index_;
+
+      if (is_selected) {
+        attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+      }
+      mvhline(row_y, left, ' ', width);
+      if (is_selected) {
+        attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
+      }
+      if (entry_index >= static_cast<int>(items.size())) {
+        if (is_selected) {
+          attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+        } else {
+          attron(COLOR_PAIR(kColorFrame));
+        }
+        mvaddch(row_y, separator_one_x, ACS_VLINE);
+        mvaddch(row_y, separator_two_x, ACS_VLINE);
+        if (is_selected) {
+          attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
+        } else {
+          attroff(COLOR_PAIR(kColorFrame));
+        }
+        continue;
+      }
+      const auto & item = items[static_cast<std::size_t>(entry_index)];
+
+      if (is_selected) {
+        attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+      } else if (item.is_namespace) {
+        attron(COLOR_PAIR(kColorFrame) | A_BOLD);
+      }
+      draw_parameter_name_cell(row_y, left, name_width, item);
+      if (is_selected) {
+        attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+      } else {
+        attron(COLOR_PAIR(kColorFrame));
+      }
+      mvaddch(row_y, separator_one_x, ACS_VLINE);
+      mvaddch(row_y, separator_two_x, ACS_VLINE);
+      if (entry_index == selected_parameter_item_index_) {
+        attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
+      } else {
+        attroff(COLOR_PAIR(kColorFrame));
+      }
+      mvaddnstr(
+        row_y,
+        left + name_width + 1,
+        pad_column(item.is_namespace ? "" : summary_value(*item.entry), value_width).c_str(),
+        value_width);
+      mvaddnstr(
+        row_y,
+        left + name_width + 1 + value_width + 1,
+        pad_column(item.is_namespace ? "" : descriptor_summary(item.entry->descriptor), desc_width).c_str(),
+        desc_width);
+      if (is_selected) {
+        mvchgat(row_y, left, width, A_BOLD, kColorSelection, nullptr);
+        attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+        mvaddch(row_y, separator_one_x, ACS_VLINE);
+        mvaddch(row_y, separator_two_x, ACS_VLINE);
+        attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
+        attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
+      } else if (item.is_namespace) {
+        attroff(COLOR_PAIR(kColorFrame) | A_BOLD);
+      }
+    }
+  }
+
+  void draw_parameter_name_cell(int row, int left, int width, const ParameterViewItem & item) const {
+    mvhline(row, left, ' ', width);
+    const int indent = item.depth * 2;
+    if (item.is_namespace) {
+      if (indent < width) {
+        mvaddnstr(
+          row,
+          left + indent,
+          truncate_line(item.label, width - indent).c_str(),
+          width - indent);
+      }
+      return;
+    }
+
+    const std::string name = item.entry->dirty ? "*" + item.label : item.label;
+    const std::string rendered = std::string(static_cast<std::size_t>(indent), ' ') + "  " + name;
+    mvaddnstr(row, left, pad_column(rendered, width).c_str(), width);
+  }
+
+  std::vector<ParameterViewItem> visible_parameter_items() const {
+    std::vector<ParameterViewItem> items;
+    append_namespace_children("", 0, items);
+    return items;
+  }
+
+  void append_namespace_children(
+    const std::string & parent_namespace,
+    int depth,
+    std::vector<ParameterViewItem> & items) const
+  {
+    std::map<std::string, bool> namespace_children;
+    std::vector<const ParameterEntry *> direct_entries;
+
+    for (const auto & entry : entries_) {
+      const std::string entry_namespace = parameter_namespace(entry.name);
+      if (!is_in_namespace(entry_namespace, parent_namespace)) {
         continue;
       }
 
-      const auto & entry = entries_[static_cast<std::size_t>(entry_index)];
-      const std::string rendered = pad_column(entry.dirty ? "*" + entry.name : entry.name, name_width) + " "
-        + pad_column(summary_value(entry), value_width) + " "
-        + pad_column(descriptor_summary(entry.descriptor), desc_width);
-
-      if (entry_index == selected_index_) {
-        attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+      const std::string remainder = parent_namespace.empty()
+        ? entry_namespace
+        : (entry_namespace == parent_namespace
+            ? std::string()
+            : entry_namespace.substr(parent_namespace.size() + 1));
+      if (remainder.empty()) {
+        direct_entries.push_back(&entry);
+        continue;
       }
-      mvaddnstr(top + row, left, rendered.c_str(), width);
-      if (entry_index == selected_index_) {
-        attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
+
+      const auto delimiter = remainder.find('.');
+      const std::string child_segment = delimiter == std::string::npos ? remainder : remainder.substr(0, delimiter);
+      const std::string child_namespace = parent_namespace.empty() ? child_segment : parent_namespace + "." + child_segment;
+      namespace_children[child_namespace] = true;
+    }
+
+    for (const auto & [child_namespace, has_entries] : namespace_children) {
+      (void)has_entries;
+      ParameterViewItem folder;
+      folder.is_namespace = true;
+      folder.label = namespace_label(child_namespace);
+      folder.namespace_path = child_namespace;
+      folder.depth = depth;
+      items.push_back(folder);
+      if (is_namespace_expanded(child_namespace)) {
+        append_namespace_children(child_namespace, depth + 1, items);
       }
     }
+
+    for (const auto * entry : direct_entries) {
+      ParameterViewItem leaf;
+      leaf.is_namespace = false;
+      leaf.label = parameter_leaf_name(entry->name);
+      leaf.depth = depth;
+      leaf.entry = const_cast<ParameterEntry *>(entry);
+      items.push_back(std::move(leaf));
+    }
+  }
+
+  std::string parameter_namespace(const std::string & parameter_name) const {
+    const auto delimiter = parameter_name.rfind('.');
+    if (delimiter == std::string::npos) {
+      return "";
+    }
+    return parameter_name.substr(0, delimiter);
+  }
+
+  std::string parameter_leaf_name(const std::string & parameter_name) const {
+    const auto delimiter = parameter_name.rfind('.');
+    if (delimiter == std::string::npos) {
+      return parameter_name;
+    }
+    return parameter_name.substr(delimiter + 1);
+  }
+
+  std::string namespace_label(const std::string & namespace_path) const {
+    const auto delimiter = namespace_path.rfind('.');
+    if (delimiter == std::string::npos) {
+      return namespace_path;
+    }
+    return namespace_path.substr(delimiter + 1);
+  }
+
+  bool is_in_namespace(const std::string & entry_namespace, const std::string & parent_namespace) const {
+    if (parent_namespace.empty()) {
+      return true;
+    }
+    if (entry_namespace == parent_namespace) {
+      return true;
+    }
+    return entry_namespace.rfind(parent_namespace + ".", 0) == 0;
+  }
+
+  bool is_namespace_expanded(const std::string & namespace_path) const {
+    const auto it = collapsed_namespaces_.find(namespace_path);
+    if (it == collapsed_namespaces_.end()) {
+      return false;
+    }
+    return !it->second;
   }
 
   void draw_node_list(int top, int left, int bottom, int right) {
@@ -1114,10 +1398,11 @@ private:
   ViewMode current_view_{ViewMode::NodeList};
   std::vector<std::string> node_entries_;
   std::vector<ParameterEntry> entries_;
+  std::map<std::string, bool> collapsed_namespaces_;
   std::chrono::steady_clock::time_point last_node_refresh_time_{std::chrono::steady_clock::time_point::min()};
   int selected_node_index_{0};
   int node_scroll_{0};
-  int selected_index_{0};
+  int selected_parameter_item_index_{0};
   int list_scroll_{0};
   bool popup_open_{false};
   bool popup_dirty_{false};

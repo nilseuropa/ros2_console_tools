@@ -26,14 +26,14 @@ install(TARGETS occupancy_grid_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
-add_executable(parameter_console_node src/parameter_console_node.cpp)
-ament_target_dependencies(parameter_console_node
+add_executable(parameter_commander src/parameter_console_node.cpp)
+ament_target_dependencies(parameter_commander
   rclcpp
 )
-target_include_directories(parameter_console_node PRIVATE ${CURSES_INCLUDE_DIR})
-target_link_libraries(parameter_console_node ${CURSES_LIBRARIES})
+target_include_directories(parameter_commander PRIVATE ${CURSES_INCLUDE_DIR})
+target_link_libraries(parameter_commander ${CURSES_LIBRARIES})
 
-install(TARGETS parameter_console_node
+install(TARGETS parameter_commander
   DESTINATION lib/${PROJECT_NAME}
 )
 
