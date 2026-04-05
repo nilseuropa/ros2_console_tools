@@ -60,6 +60,21 @@ enum class CostBucket : std::size_t {
   Unknown = 5,
 };
 
+bool rotation_swaps_axes(int rotation_degrees) {
+  return rotation_degrees == 90 || rotation_degrees == 270;
+}
+
+std::pair<std::size_t, std::size_t> rotated_dimensions(
+  std::size_t source_width,
+  std::size_t source_height,
+  int rotation_degrees)
+{
+  if (rotation_swaps_axes(rotation_degrees)) {
+    return {source_height, source_width};
+  }
+  return {source_width, source_height};
+}
+
 int8_t normalize_occupancy_value(int8_t occupancy_value) {
   if (occupancy_value < kOccupancyUnknown) {
     return kOccupancyUnknown;
@@ -254,14 +269,23 @@ class OccupancyGridCliNode : public rclcpp::Node {
 public:
   OccupancyGridCliNode()
   : Node("occupancy_grid_visualizer"),
-    stdout_is_tty_(::isatty(STDOUT_FILENO) != 0),
-    use_color_(stdout_is_tty_ && terminal_supports_color()) {
+    stdout_is_tty_(::isatty(STDOUT_FILENO) != 0) {
     topic_ = this->declare_parameter<std::string>("topic", "/map");
     render_hz_ = std::max(1.0, this->declare_parameter<double>("render_hz", 5.0));
     max_width_ = std::max(0, static_cast<int>(this->declare_parameter("max_width", 0)));
     max_height_ = std::max(0, static_cast<int>(this->declare_parameter("max_height", 0)));
     show_free_ = this->declare_parameter<bool>("show_free", true);
     show_legend_ = this->declare_parameter<bool>("show_legend", true);
+    monochrome_ = this->declare_parameter<bool>("monochrome", false);
+    rotation_degrees_ = this->declare_parameter<int>("rotation", 90);
+    if (rotation_degrees_ != 90 && rotation_degrees_ != 180 && rotation_degrees_ != 270) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Unsupported rotation '%d'; falling back to 90 degrees.",
+        rotation_degrees_);
+      rotation_degrees_ = 90;
+    }
+    use_color_ = stdout_is_tty_ && terminal_supports_color() && !monochrome_;
 
     build_cell_cache();
 
@@ -283,7 +307,11 @@ public:
     if (!stdout_is_tty_) {
       RCLCPP_WARN(this->get_logger(), "stdout is not a TTY; falling back to ASCII output.");
     } else if (!use_color_) {
-      RCLCPP_WARN(this->get_logger(), "Terminal color support disabled; falling back to ASCII output.");
+      RCLCPP_WARN(
+        this->get_logger(),
+        monochrome_
+          ? "Monochrome mode enabled; falling back to ASCII output."
+          : "Terminal color support disabled; falling back to ASCII output.");
     }
   }
 
@@ -401,8 +429,8 @@ private:
     const std::size_t source_width = static_cast<std::size_t>(message.info.width);
     const std::size_t source_height = static_cast<std::size_t>(message.info.height);
     const std::size_t cell_count = source_width * source_height;
-    const std::size_t rotated_width = source_height;
-    const std::size_t rotated_height = source_width;
+    const auto [rotated_width, rotated_height] = rotated_dimensions(
+      source_width, source_height, rotation_degrees_);
     const RenderGeometry geometry = compute_render_geometry(rotated_width, rotated_height);
 
     std::vector<AggregatedCell> aggregated_cells(
@@ -422,7 +450,8 @@ private:
                   << " src=" << source_width << 'x' << source_height
                   << '@' << std::fixed << std::setprecision(2) << message.info.resolution << "m"
                   << " view=" << geometry.width << 'x' << geometry.height
-                  << " rot=90cw mode=costmap";
+                  << " rot=" << rotation_degrees_
+                  << " mode=" << (use_color_ ? "costmap" : "mono");
       append_terminal_line(
         stream,
         current_row++,
@@ -471,13 +500,31 @@ private:
   {
     const std::size_t source_width = static_cast<std::size_t>(message.info.width);
     const std::size_t source_height = static_cast<std::size_t>(message.info.height);
-    const std::size_t rotated_width = source_height == 0 ? 1 : source_height;
-    const std::size_t rotated_height = source_width == 0 ? 1 : source_width;
+    const auto rotated_dimensions_pair = rotated_dimensions(
+      source_width, source_height, rotation_degrees_);
+    const std::size_t rotated_width = std::max<std::size_t>(1, rotated_dimensions_pair.first);
+    const std::size_t rotated_height = std::max<std::size_t>(1, rotated_dimensions_pair.second);
 
     for (std::size_t source_y = 0; source_y < source_height; ++source_y) {
       for (std::size_t source_x = 0; source_x < source_width; ++source_x) {
-        const std::size_t rotated_x = source_height - 1 - source_y;
-        const std::size_t rotated_y = source_x;
+        std::size_t rotated_x = source_x;
+        std::size_t rotated_y = source_y;
+        switch (rotation_degrees_) {
+          case 90:
+            rotated_x = source_height - 1 - source_y;
+            rotated_y = source_x;
+            break;
+          case 180:
+            rotated_x = source_width - 1 - source_x;
+            rotated_y = source_height - 1 - source_y;
+            break;
+          case 270:
+            rotated_x = source_y;
+            rotated_y = source_width - 1 - source_x;
+            break;
+          default:
+            break;
+        }
         const int render_x = std::min(
           geometry.width - 1,
           static_cast<int>((rotated_x * static_cast<std::size_t>(geometry.width)) / rotated_width));
@@ -568,8 +615,10 @@ private:
   double render_hz_{5.0};
   int max_width_{0};
   int max_height_{0};
+  int rotation_degrees_{90};
   bool show_free_{true};
   bool show_legend_{true};
+  bool monochrome_{false};
   bool stdout_is_tty_{false};
   bool use_color_{false};
   mutable bool terminal_prepared_{false};
