@@ -272,12 +272,11 @@ private:
         refresh_all();
         return true;
       case KEY_F(3):
-        if (current_view_ == ViewMode::NodeList) {
-          refresh_node_list();
-        } else {
+        if (current_view_ == ViewMode::ParameterList) {
           refresh_selected();
+          return true;
         }
-        return true;
+        break;
       case 27:
         if (current_view_ == ViewMode::ParameterList) {
           switch_to_node_list();
@@ -961,24 +960,56 @@ private:
       attroff(COLOR_PAIR(kColorPopup));
     }
 
-    draw_box(top, left, bottom, right);
+    if (popup_dirty_) {
+      attron(COLOR_PAIR(kColorDirty));
+      mvaddch(top, left, ACS_ULCORNER);
+      mvaddch(top, right, ACS_URCORNER);
+      mvaddch(bottom, left, ACS_LLCORNER);
+      mvaddch(bottom, right, ACS_LRCORNER);
+      mvhline(top, left + 1, ACS_HLINE, right - left - 1);
+      mvhline(bottom, left + 1, ACS_HLINE, right - left - 1);
+      mvvline(top + 1, left, ACS_VLINE, bottom - top - 1);
+      mvvline(top + 1, right, ACS_VLINE, bottom - top - 1);
+      attroff(COLOR_PAIR(kColorDirty));
+    } else {
+      draw_box(top, left, bottom, right);
+    }
     attron(COLOR_PAIR(kColorTitle) | A_BOLD);
     mvprintw(top, left + 2, " Edit Parameter ");
     attroff(COLOR_PAIR(kColorTitle) | A_BOLD);
 
+    constexpr int label_width = 11;
+    auto draw_popup_field = [&](int row, const std::string & label, const std::string & value) {
+      const std::string label_text = pad_column(label, label_width) + ": ";
+      mvaddnstr(row, left + 1, label_text.c_str(), inner_width);
+      mvaddnstr(
+        row,
+        left + 1 + static_cast<int>(label_text.size()),
+        truncate_line(value, inner_width - static_cast<int>(label_text.size())).c_str(),
+        inner_width - static_cast<int>(label_text.size()));
+    };
+
     attron(COLOR_PAIR(kColorPopup));
-    mvaddnstr(top + 1, left + 1, truncate_line("name: " + entry->name, inner_width).c_str(), inner_width);
-    mvaddnstr(top + 2, left + 1, truncate_line("descriptor: " + descriptor_summary(entry->descriptor), inner_width).c_str(), inner_width);
-    mvaddnstr(top + 3, left + 1, truncate_line(
-      "type: " + parameter_type_name(entry->descriptor.type)
-      + "  min: " + parameter_min(*entry)
-      + "  max: " + parameter_max(*entry), inner_width).c_str(), inner_width);
-    mvaddnstr(top + 4, left + 1, truncate_line(
-      std::string("current: ") + summary_value(*entry), inner_width).c_str(), inner_width);
+    draw_popup_field(top + 1, "name", "");
+    attron(COLOR_PAIR(kColorHeader) | A_BOLD);
+    mvaddnstr(
+      top + 1,
+      left + 1 + label_width + 2,
+      truncate_line(entry->name, inner_width - label_width - 2).c_str(),
+      inner_width - label_width - 2);
+    attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
+    draw_popup_field(top + 2, "descriptor", descriptor_summary(entry->descriptor));
+    draw_popup_field(
+      top + 3,
+      "type",
+      parameter_type_name(entry->descriptor.type)
+        + "  [" + parameter_min(*entry) + "]"
+        + "  [" + parameter_max(*entry) + "]");
+    draw_popup_field(top + 4, "current", summary_value(*entry));
     mvhline(top + 5, left + 1, ACS_HLINE, inner_width);
     attroff(COLOR_PAIR(kColorPopup));
     draw_box(field_top, field_left, field_top + 2, field_right);
-    attron(COLOR_PAIR(kColorInput));
+    attron(COLOR_PAIR(kColorHeader) | A_BOLD);
     mvhline(field_top + 1, field_left + 1, ' ', field_inner_width);
     const std::string visible_buffer = tail_fit(popup_buffer_, edit_text_width);
     mvaddnstr(
@@ -986,12 +1017,7 @@ private:
       field_left + 1,
       visible_buffer.c_str(),
       edit_text_width);
-    attroff(COLOR_PAIR(kColorInput));
-    if (popup_dirty_) {
-      attron(COLOR_PAIR(kColorDirty) | A_BOLD);
-      mvaddnstr(top + 6, right - 4, "[*]", 3);
-      attroff(COLOR_PAIR(kColorDirty) | A_BOLD);
-    }
+    attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
     if (popup_is_editable(*entry) && software_caret_visible()) {
       const int visible_buffer_width = std::min(edit_text_width, static_cast<int>(visible_buffer.size()));
       const int cursor_x = std::min(
@@ -1069,7 +1095,7 @@ private:
     if (popup_open_) {
       help = "F2 Save  F3 Load  Enter Save+Close  Esc Close  F10 Exit";
     } else if (current_view_ == ViewMode::NodeList) {
-      help = "Enter Select Node  F3 Refresh Nodes  F4 Refresh Nodes  F10 Exit";
+      help = "Enter Select Node  F4 Refresh Nodes  F10 Exit";
     } else {
       help = "Enter Edit  F3 Refresh Param  F4 Refresh All  Esc Nodes  F10 Exit";
     }
