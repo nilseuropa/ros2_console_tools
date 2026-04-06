@@ -1,12 +1,58 @@
 #include "ros2_console_tools/tui.hpp"
 
+#include <cctype>
 #include <clocale>
 #include <langinfo.h>
 #include <string>
+#include <vector>
 
 namespace ros2_console_tools::tui {
 
 namespace {
+
+struct HelpBlock {
+  std::string key;
+  std::string label;
+};
+
+std::string trim(const std::string & text) {
+  std::size_t start = 0;
+  while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start]))) {
+    ++start;
+  }
+  std::size_t end = text.size();
+  while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1]))) {
+    --end;
+  }
+  return text.substr(start, end - start);
+}
+
+std::vector<HelpBlock> parse_help_blocks(const std::string & text) {
+  std::vector<HelpBlock> blocks;
+  std::size_t start = 0;
+  while (start < text.size()) {
+    std::size_t separator = text.find("  ", start);
+    std::string block_text =
+      separator == std::string::npos ? text.substr(start) : text.substr(start, separator - start);
+    block_text = trim(block_text);
+    if (!block_text.empty()) {
+      const std::size_t split = block_text.find(' ');
+      if (split == std::string::npos) {
+        blocks.push_back({block_text, ""});
+      } else {
+        blocks.push_back({block_text.substr(0, split), trim(block_text.substr(split + 1))});
+      }
+    }
+    if (separator == std::string::npos) {
+      break;
+    }
+    start = separator;
+    while (start < text.size() && text[start] == ' ') {
+      ++start;
+    }
+  }
+  return blocks;
+}
 
 void initialize_theme() {
   if (!has_colors()) {
@@ -31,6 +77,7 @@ void initialize_theme() {
   init_pair(kColorError, COLOR_RED, -1);
   init_pair(kColorFatal, COLOR_RED, COLOR_YELLOW);
   init_pair(kColorAccent, COLOR_CYAN, -1);
+  init_pair(kColorHelpKey, COLOR_BLACK, COLOR_YELLOW);
 }
 
 }  // namespace
@@ -115,7 +162,67 @@ void draw_status_bar(int row, int columns, const std::string & text) {
 }
 
 void draw_help_bar(int row, int columns, const std::string & text) {
-  draw_bar(row, columns, text, kColorHelp, 0);
+  attrset(A_NORMAL);
+  mvhline(row, 0, ' ', columns);
+
+  int column = 0;
+  bool first_block = true;
+  for (const auto & block : parse_help_blocks(text)) {
+    if (column >= columns) {
+      break;
+    }
+
+    if (!first_block) {
+      attrset(A_NORMAL);
+      mvaddch(row, column, ' ');
+      ++column;
+      if (column >= columns) {
+        break;
+      }
+    }
+
+    const std::string key = truncate_text(block.key, std::max(0, columns - column));
+    if (key.empty()) {
+      continue;
+    }
+
+    attron(COLOR_PAIR(kColorHelpKey) | A_BOLD);
+    mvaddnstr(row, column, key.c_str(), columns - column);
+    attroff(COLOR_PAIR(kColorHelpKey) | A_BOLD);
+    column += static_cast<int>(key.size());
+    if (column >= columns) {
+      break;
+    }
+
+    if (!block.label.empty()) {
+      const std::string separator = " ";
+      attron(COLOR_PAIR(kColorHelp));
+      mvaddnstr(row, column, separator.c_str(), columns - column);
+      attroff(COLOR_PAIR(kColorHelp));
+      column += static_cast<int>(separator.size());
+      if (column >= columns) {
+        break;
+      }
+
+      const std::string label = truncate_text(block.label, std::max(0, columns - column));
+      attron(COLOR_PAIR(kColorHelp));
+      mvaddnstr(row, column, label.c_str(), columns - column);
+      attroff(COLOR_PAIR(kColorHelp));
+      column += static_cast<int>(label.size());
+      if (column >= columns) {
+        break;
+      }
+
+      attron(COLOR_PAIR(kColorHelp));
+      mvaddch(row, column, ' ');
+      attroff(COLOR_PAIR(kColorHelp));
+      ++column;
+      if (column >= columns) {
+        break;
+      }
+    }
+    first_block = false;
+  }
 }
 
 }  // namespace ros2_console_tools::tui

@@ -24,6 +24,7 @@ enum ColorPairId {
   kColorError = 14,
   kColorFatal = 15,
   kColorAccent = 16,
+  kColorHelpKey = 17,
 };
 
 class Session {
