@@ -51,9 +51,16 @@ using tui::Session;
 using tui::draw_box;
 using tui::draw_box_char;
 using tui::draw_help_bar;
+using tui::draw_search_box;
 using tui::draw_status_bar;
 using tui::draw_text_vline;
 using tui::truncate_text;
+using tui::find_best_match;
+using tui::handle_search_input;
+using tui::is_alt_binding;
+using tui::SearchInputResult;
+using tui::SearchState;
+using tui::start_search;
 
 template<typename T>
 std::string scalar_to_string(const T & value) {
@@ -120,6 +127,9 @@ public:
 
 private:
   bool handle_key(int key) {
+    if (search_state_.active) {
+      return handle_search_key(key);
+    }
     switch (view_mode_) {
       case ViewMode::ServiceList:
         return handle_service_list_key(key);
@@ -136,6 +146,13 @@ private:
         return false;
       case KEY_F(4):
         refresh_services();
+        return true;
+      case 27:
+        if (is_alt_binding(key, 's')) {
+          start_search(search_state_);
+          status_line_ = "Search.";
+          return true;
+        }
         return true;
       case KEY_UP:
       case 'k':
@@ -166,6 +183,33 @@ private:
       default:
         return true;
     }
+  }
+
+  bool handle_search_key(int key) {
+    const SearchInputResult result = handle_search_input(search_state_, key);
+    if (result == SearchInputResult::Cancelled) {
+      status_line_ = "Search cancelled.";
+      return true;
+    }
+    if (result == SearchInputResult::Accepted) {
+      status_line_ = search_state_.query.empty() ? "Search closed." : "Search: " + search_state_.query;
+      return true;
+    }
+    if (result != SearchInputResult::Changed || view_mode_ != ViewMode::ServiceList) {
+      return true;
+    }
+
+    std::vector<std::string> labels;
+    labels.reserve(services_.size());
+    for (const auto & entry : services_) {
+      labels.push_back(entry.name);
+    }
+    const int match = find_best_match(labels, search_state_.query, selected_service_index_);
+    if (match >= 0) {
+      selected_service_index_ = match;
+    }
+    status_line_ = "Search: " + search_state_.query;
+    return true;
   }
 
   bool handle_service_detail_key(int key) {
@@ -540,6 +584,7 @@ private:
     }
     draw_status_line(status_row, columns);
     draw_help_line(help_row, columns);
+    draw_search_box(rows, columns, search_state_);
     refresh();
   }
 
@@ -643,7 +688,7 @@ private:
     const std::string help =
       view_mode_ == ViewMode::ServiceDetail
       ? "F2 Call  F3 Reset Request  F4 Refresh  Esc Services  F10 Exit"
-      : "Enter Inspect  F4 Refresh  F10 Exit";
+      : "Enter Inspect  Alt+S Search  F4 Refresh  F10 Exit";
     draw_help_bar(row, columns, truncate_text(help, columns - 1));
   }
 
@@ -657,6 +702,7 @@ private:
   std::vector<DetailRow> response_rows_;
   std::string response_error_;
   std::string status_line_{"Loading services..."};
+  SearchState search_state_;
 };
 
 }  // namespace

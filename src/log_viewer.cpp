@@ -60,10 +60,17 @@ using tui::Session;
 using tui::truncate_text;
 using tui::draw_box;
 using tui::draw_box_char;
+using tui::draw_search_box;
 using tui::draw_status_bar;
 using tui::draw_help_bar;
 using tui::draw_help_bar_region;
 using tui::draw_text_vline;
+using tui::find_best_match;
+using tui::handle_search_input;
+using tui::is_alt_binding;
+using tui::SearchInputResult;
+using tui::SearchState;
+using tui::start_search;
 
 std::string time_string(const builtin_interfaces::msg::Time & stamp) {
   std::ostringstream stream;
@@ -152,6 +159,9 @@ private:
     if (filter_prompt_open_) {
       return handle_filter_prompt_key(key);
     }
+    if (search_state_.active) {
+      return handle_search_key(key);
+    }
     if (view_mode_ == ViewMode::CodeInspect) {
       return handle_code_view_key(key);
     }
@@ -163,6 +173,11 @@ private:
       case KEY_F(10):
         return false;
       case 27:
+        if (is_alt_binding(key, 's')) {
+          start_search(search_state_);
+          set_status("Search.");
+          return true;
+        }
         if (view_mode_ == ViewMode::SourceLive) {
           close_live_source();
           return true;
@@ -201,6 +216,62 @@ private:
       return handle_source_key(key);
     }
     return handle_log_key(key);
+  }
+
+  bool handle_search_key(int key) {
+    const SearchInputResult result = handle_search_input(search_state_, key);
+    if (result == SearchInputResult::Cancelled) {
+      set_status("Search cancelled.");
+      return true;
+    }
+    if (result == SearchInputResult::Accepted) {
+      set_status(search_state_.query.empty() ? "Search closed." : "Search: " + search_state_.query);
+      return true;
+    }
+    if (result != SearchInputResult::Changed) {
+      return true;
+    }
+
+    if (view_mode_ == ViewMode::SourceLive) {
+      const auto snapshot = live_source_logs_snapshot();
+      std::vector<std::string> labels;
+      labels.reserve(snapshot.size());
+      for (const auto & entry : snapshot) {
+        labels.push_back(level_string(entry.level) + " " + entry.message);
+      }
+      const int match = find_best_match(labels, search_state_.query, selected_live_log_index_);
+      if (match >= 0) {
+        selected_live_log_index_ = match;
+      }
+      set_status("Search: " + search_state_.query);
+      return true;
+    }
+
+    if (focus_ == PaneFocus::Sources) {
+      const auto snapshot = source_snapshot();
+      std::vector<std::string> labels;
+      labels.reserve(snapshot.size());
+      for (const auto & entry : snapshot) {
+        labels.push_back(entry.name);
+      }
+      const int match = find_best_match(labels, search_state_.query, selected_source_index_);
+      if (match >= 0) {
+        selected_source_index_ = match;
+      }
+    } else {
+      const auto snapshot = filtered_logs_snapshot();
+      std::vector<std::string> labels;
+      labels.reserve(snapshot.size());
+      for (const auto & entry : snapshot) {
+        labels.push_back(entry.source + " " + entry.message);
+      }
+      const int match = find_best_match(labels, search_state_.query, selected_log_index_);
+      if (match >= 0) {
+        selected_log_index_ = match;
+      }
+    }
+    set_status("Search: " + search_state_.query);
+    return true;
   }
 
   bool handle_filter_prompt_key(int key) {
@@ -690,6 +761,7 @@ private:
     if (detail_popup_open_) {
       draw_detail_popup(rows, columns);
     }
+    draw_search_box(rows, columns, search_state_);
 
     refresh();
   }
@@ -1036,8 +1108,8 @@ private:
       view_mode_ == ViewMode::CodeInspect
       ? "Esc Back  Up Down Scroll  PgUp PgDn Page  Home Top  End Bottom  F10 Exit"
       : view_mode_ == ViewMode::SourceLive
-      ? "Enter Details  Esc Back  F4 Refresh  F6 Level  / Filter  F10 Exit"
-      : "Tab Pane  Space Mark  Enter Live  F4 Refresh  F5 Hide Unselected  F6 Level  / Filter  F10 Exit";
+      ? "Enter Details  Alt+S Search  Esc Back  F4 Refresh  F6 Level  / Filter  F10 Exit"
+      : "Tab Pane  Space Mark  Enter Live  Alt+S Search  F4 Refresh  F5 Hide Unselected  F6 Level  / Filter  F10 Exit";
     draw_help_bar(row, columns, help);
   }
 
@@ -1127,6 +1199,7 @@ private:
   std::string filter_buffer_;
   bool detail_popup_open_{false};
   LogEntry detail_entry_;
+  SearchState search_state_;
   std::vector<std::string> code_view_lines_;
   std::string code_view_path_;
   int code_view_top_line_{0};

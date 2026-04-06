@@ -59,9 +59,16 @@ using tui::Session;
 using tui::truncate_text;
 using tui::draw_box;
 using tui::draw_box_char;
+using tui::draw_search_box;
 using tui::draw_status_bar;
 using tui::draw_help_bar;
 using tui::draw_text_vline;
+using tui::find_best_match;
+using tui::handle_search_input;
+using tui::is_alt_binding;
+using tui::SearchInputResult;
+using tui::SearchState;
+using tui::start_search;
 
 std::string format_hz(double hz) {
   if (hz <= 0.0) {
@@ -210,6 +217,9 @@ private:
   static constexpr auto kStaleAfter = std::chrono::milliseconds(1500);
 
   bool handle_key(int key) {
+    if (search_state_.active) {
+      return handle_search_key(key);
+    }
     switch (view_mode_) {
       case ViewMode::TopicList:
         return handle_topic_list_key(key);
@@ -236,6 +246,13 @@ private:
         status_line_ = show_only_monitored_
           ? "Showing monitored topics only."
           : "Showing all topics.";
+        return true;
+      case 27:
+        if (is_alt_binding(key, 's')) {
+          start_search(search_state_);
+          status_line_ = "Search.";
+          return true;
+        }
         return true;
       case KEY_UP:
       case 'k':
@@ -276,6 +293,34 @@ private:
       default:
         return true;
     }
+  }
+
+  bool handle_search_key(int key) {
+    const SearchInputResult result = handle_search_input(search_state_, key);
+    if (result == SearchInputResult::Cancelled) {
+      status_line_ = "Search cancelled.";
+      return true;
+    }
+    if (result == SearchInputResult::Accepted) {
+      status_line_ = search_state_.query.empty() ? "Search closed." : "Search: " + search_state_.query;
+      return true;
+    }
+    if (result != SearchInputResult::Changed || view_mode_ != ViewMode::TopicList) {
+      return true;
+    }
+
+    const auto items = visible_topic_items();
+    std::vector<std::string> labels;
+    labels.reserve(items.size());
+    for (const auto & item : items) {
+      labels.push_back(item.label);
+    }
+    const int match = find_best_match(labels, search_state_.query, selected_index_);
+    if (match >= 0) {
+      selected_index_ = match;
+    }
+    status_line_ = "Search: " + search_state_.query;
+    return true;
   }
 
   bool handle_topic_detail_key(int key) {
@@ -901,6 +946,7 @@ private:
     }
     draw_status_line(status_row, columns);
     draw_help_line(help_row, columns);
+    draw_search_box(rows, columns, search_state_);
 
     refresh();
   }
@@ -1106,7 +1152,7 @@ private:
     const std::string help =
       view_mode_ == ViewMode::TopicDetail
       ? "Enter Details  Esc Topics  F4 Refresh  F10 Exit"
-      : "Enter Details  Space/Ins Monitor  F4 Refresh  F5 Filter  F10 Exit";
+      : "Enter Details  Alt+S Search  Space/Ins Monitor  F4 Refresh  F5 Filter  F10 Exit";
     draw_help_bar(row, columns, help);
   }
 
@@ -1246,6 +1292,7 @@ private:
   int detail_scroll_{0};
   bool show_only_monitored_{false};
   std::string detail_topic_name_;
+  SearchState search_state_;
   std::string status_line_{"Loading topics..."};
   Clock::time_point last_refresh_time_{};
 };

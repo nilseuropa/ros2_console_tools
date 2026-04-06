@@ -1,8 +1,10 @@
 #include "ros2_console_tools/tui.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <clocale>
 #include <langinfo.h>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -62,6 +64,13 @@ std::vector<HelpBlock> parse_help_blocks(const std::string & text) {
   return blocks;
 }
 
+std::string to_lower(std::string text) {
+  for (char & character : text) {
+    character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+  }
+  return text;
+}
+
 void initialize_theme() {
   if (!has_colors()) {
     return;
@@ -113,6 +122,79 @@ void set_theme(const Theme & theme) {
     const auto & color = g_theme[static_cast<std::size_t>(role)];
     init_pair(role, color.foreground, color.background);
   }
+}
+
+bool is_alt_binding(int key, int expected) {
+  if (key != 27) {
+    return false;
+  }
+
+  const int next = getch();
+  if (next == ERR) {
+    return false;
+  }
+  if (next == expected || next == std::toupper(expected)) {
+    return true;
+  }
+  ungetch(next);
+  return false;
+}
+
+void start_search(SearchState & state) {
+  state.active = true;
+  state.query.clear();
+}
+
+SearchInputResult handle_search_input(SearchState & state, int key) {
+  switch (key) {
+    case 27:
+      state.active = false;
+      state.query.clear();
+      return SearchInputResult::Cancelled;
+    case '\n':
+    case KEY_ENTER:
+      state.active = false;
+      return SearchInputResult::Accepted;
+    case KEY_BACKSPACE:
+    case 127:
+    case '\b':
+      if (!state.query.empty()) {
+        state.query.pop_back();
+      }
+      return SearchInputResult::Changed;
+    default:
+      if (key >= 32 && key <= 126) {
+        state.query.push_back(static_cast<char>(key));
+        return SearchInputResult::Changed;
+      }
+      return SearchInputResult::None;
+  }
+}
+
+int find_best_match(const std::vector<std::string> & labels, const std::string & query, int current_index) {
+  if (labels.empty() || query.empty()) {
+    return -1;
+  }
+
+  const std::string needle = to_lower(query);
+  const int count = static_cast<int>(labels.size());
+  const int start = std::clamp(current_index, 0, count - 1);
+
+  for (int pass = 0; pass < 2; ++pass) {
+    for (int offset = 0; offset < count; ++offset) {
+      const int index = (start + offset) % count;
+      const std::string haystack = to_lower(labels[static_cast<std::size_t>(index)]);
+      const std::size_t position = haystack.find(needle);
+      if (position == std::string::npos) {
+        continue;
+      }
+      if ((pass == 0 && position == 0) || pass == 1) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
 }
 
 Session::Session() {
@@ -268,6 +350,36 @@ void draw_help_bar_region(int row, int left, int width, const std::string & text
 
 void draw_help_bar(int row, int columns, const std::string & text) {
   draw_help_bar_region(row, 0, columns, text);
+}
+
+void draw_search_box(int rows, int columns, const SearchState & state, const std::string & prompt) {
+  if (!state.active || rows < 6 || columns < 20) {
+    return;
+  }
+
+  const int box_width = std::min(columns - 4, 48);
+  const int left = std::max(2, (columns - box_width) / 2);
+  const int top = std::max(1, rows - 5);
+  const int bottom = top + 2;
+  const int right = left + box_width - 1;
+  const int inner_width = box_width - 2;
+
+  attron(COLOR_PAIR(kColorPopup));
+  mvhline(top + 1, left + 1, ' ', inner_width);
+  attroff(COLOR_PAIR(kColorPopup));
+  draw_box(top, left, bottom, right, kColorFrame);
+
+  const std::string label = prompt + ": ";
+  attron(COLOR_PAIR(kColorHeader) | A_BOLD);
+  mvaddnstr(top + 1, left + 1, label.c_str(), inner_width);
+  attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
+
+  const int input_left = left + 1 + static_cast<int>(label.size());
+  const int input_width = std::max(0, right - input_left);
+  attron(COLOR_PAIR(kColorInput) | A_BOLD);
+  mvhline(top + 1, input_left, ' ', input_width);
+  mvaddnstr(top + 1, input_left, truncate_text(state.query, input_width).c_str(), input_width);
+  attroff(COLOR_PAIR(kColorInput) | A_BOLD);
 }
 
 }  // namespace ros2_console_tools::tui

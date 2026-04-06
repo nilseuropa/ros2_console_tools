@@ -5,6 +5,7 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 namespace ros2_console_tools::tui {
 
@@ -38,6 +39,18 @@ struct ThemeColor {
 
 using Theme = std::array<ThemeColor, kThemeColorCount>;
 
+struct SearchState {
+  bool active{false};
+  std::string query;
+};
+
+enum class SearchInputResult {
+  None,
+  Changed,
+  Accepted,
+  Cancelled,
+};
+
 class Session {
 public:
   Session();
@@ -50,6 +63,10 @@ public:
 Theme make_default_theme();
 const Theme & current_theme();
 void set_theme(const Theme & theme);
+bool is_alt_binding(int key, int expected);
+void start_search(SearchState & state);
+SearchInputResult handle_search_input(SearchState & state, int key);
+int find_best_match(const std::vector<std::string> & labels, const std::string & query, int current_index);
 
 std::string truncate_text(const std::string & text, int width);
 
@@ -62,6 +79,7 @@ void draw_bar(int row, int columns, const std::string & text, int color_pair, in
 void draw_status_bar(int row, int columns, const std::string & text);
 void draw_help_bar_region(int row, int left, int width, const std::string & text);
 void draw_help_bar(int row, int columns, const std::string & text);
+void draw_search_box(int rows, int columns, const SearchState & state, const std::string & prompt = "Search");
 
 }  // namespace ros2_console_tools::tui
 

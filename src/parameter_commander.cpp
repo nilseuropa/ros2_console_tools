@@ -106,9 +106,16 @@ using tui::draw_box;
 using tui::draw_box_char;
 using tui::draw_help_bar;
 using tui::draw_help_bar_region;
+using tui::draw_search_box;
 using tui::draw_status_bar;
 using tui::draw_text_hline;
 using tui::draw_text_vline;
+using tui::find_best_match;
+using tui::handle_search_input;
+using tui::is_alt_binding;
+using tui::SearchInputResult;
+using tui::SearchState;
+using tui::start_search;
 
 std::string truncate_line(const std::string & line, int max_columns) {
   if (max_columns <= 0) {
@@ -284,6 +291,9 @@ private:
     if (popup_open_) {
       return handle_popup_key(key);
     }
+    if (search_state_.active) {
+      return handle_search_key(key);
+    }
 
     switch (key) {
       case KEY_F(10):
@@ -299,6 +309,11 @@ private:
         }
         break;
       case 27:
+        if (is_alt_binding(key, 's')) {
+          start_search(search_state_);
+          set_status("Search.");
+          return true;
+        }
         if (current_view_ == ViewMode::ParameterList) {
           switch_to_node_list();
           return true;
@@ -320,6 +335,44 @@ private:
     } else {
       handle_list_key(key);
     }
+    return true;
+  }
+
+  bool handle_search_key(int key) {
+    const SearchInputResult result = handle_search_input(search_state_, key);
+    if (result == SearchInputResult::Cancelled) {
+      set_status("Search cancelled.");
+      return true;
+    }
+    if (result == SearchInputResult::Accepted) {
+      set_status(search_state_.query.empty() ? "Search closed." : "Search: " + search_state_.query);
+      return true;
+    }
+    if (result != SearchInputResult::Changed) {
+      return true;
+    }
+
+    if (current_view_ == ViewMode::NodeList) {
+      const int match = find_best_match(node_entries_, search_state_.query, selected_node_index_);
+      if (match >= 0) {
+        selected_node_index_ = match;
+      }
+      set_status("Search: " + search_state_.query);
+      return true;
+    }
+
+    const auto items = visible_parameter_items();
+    std::vector<std::string> labels;
+    labels.reserve(items.size());
+    for (const auto & item : items) {
+      labels.push_back(item.label);
+    }
+    const int match = find_best_match(labels, search_state_.query, selected_parameter_item_index_);
+    if (match >= 0) {
+      selected_parameter_item_index_ = match;
+      sync_edit_buffer_from_selected();
+    }
+    set_status("Search: " + search_state_.query);
     return true;
   }
 
@@ -953,6 +1006,7 @@ private:
     }
     draw_status_line(status_row, columns);
     draw_help_line(help_row, columns);
+    draw_search_box(rows, columns, search_state_);
     if (popup_open_) {
       draw_popup(rows, columns);
     }
@@ -1373,9 +1427,9 @@ private:
     if (popup_open_) {
       help = "F2 Save  F3 Load  Enter Save+Close  Esc Close  F10 Exit";
     } else if (current_view_ == ViewMode::NodeList) {
-      help = "Enter Select Node  F4 Refresh Nodes  F10 Exit";
+      help = "Enter Select Node  Alt+S Search  F4 Refresh Nodes  F10 Exit";
     } else {
-      help = "Enter Edit  F3 Refresh Param  F4 Refresh All  Esc Nodes  F10 Exit";
+      help = "Enter Edit  Alt+S Search  F3 Refresh Param  F4 Refresh All  Esc Nodes  F10 Exit";
     }
     draw_help_bar(row, columns, truncate_line(help, columns));
   }
@@ -1397,6 +1451,7 @@ private:
   int list_scroll_{0};
   bool popup_open_{false};
   bool popup_dirty_{false};
+  SearchState search_state_;
   std::string popup_buffer_;
   std::string status_message_{"F4 to load parameters."};
 };
