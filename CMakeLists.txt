@@ -15,10 +15,12 @@ find_package(ament_cmake REQUIRED)
 set(CURSES_NEED_WIDE TRUE)
 find_package(Curses REQUIRED)
 find_library(NCURSESW_LIBRARY NAMES ncursesw)
+find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(rosidl_typesupport_introspection_cpp REQUIRED)
+find_package(tf2_msgs REQUIRED)
 
 add_executable(occupancy_grid_node src/occupancy_grid_node.cpp)
 ament_target_dependencies(occupancy_grid_node
@@ -78,6 +80,20 @@ target_include_directories(service_commander PRIVATE ${CURSES_INCLUDE_DIR} inclu
 target_link_libraries(service_commander ${NCURSESW_LIBRARY})
 
 install(TARGETS service_commander
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(tf_monitor src/tf_monitor.cpp)
+target_sources(tf_monitor PRIVATE src/tui.cpp)
+ament_target_dependencies(tf_monitor
+  geometry_msgs
+  rclcpp
+  tf2_msgs
+)
+target_include_directories(tf_monitor PRIVATE ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(tf_monitor ${NCURSESW_LIBRARY})
+
+install(TARGETS tf_monitor
   DESTINATION lib/${PROJECT_NAME}
 )
 
