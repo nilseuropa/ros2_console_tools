@@ -2,8 +2,9 @@
 
 namespace ros2_console_tools {
 
-TopicMonitorBackend::TopicMonitorBackend()
-: Node("topic_monitor")
+TopicMonitorBackend::TopicMonitorBackend(const std::string & initial_topic)
+: Node("topic_monitor"),
+  initial_topic_name_(initial_topic)
 {
   const std::string theme_config_path =
     this->declare_parameter<std::string>("theme_config_path", tui::default_theme_config_path());
@@ -18,35 +19,54 @@ TopicMonitorBackend::TopicMonitorBackend()
 void TopicMonitorBackend::refresh_topics() {
   const auto discovered_topics = this->get_topic_names_and_types();
 
-  std::lock_guard<std::mutex> lock(mutex_);
-  std::map<std::string, TopicEntry> refreshed;
-  for (const auto & [name, types] : discovered_topics) {
-    if (name.empty()) {
-      continue;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::map<std::string, TopicEntry> refreshed;
+    for (const auto & [name, types] : discovered_topics) {
+      if (name.empty()) {
+        continue;
+      }
+
+      TopicEntry entry;
+      auto existing = topics_.find(name);
+      if (existing != topics_.end()) {
+        entry = existing->second;
+      }
+
+      entry.name = name;
+      entry.type = types.empty() ? "<unknown>" : types.front();
+      refreshed[name] = std::move(entry);
     }
 
-    TopicEntry entry;
-    auto existing = topics_.find(name);
-    if (existing != topics_.end()) {
-      entry = existing->second;
-    }
+    topics_.swap(refreshed);
+    monitored_subscriptions_.erase(
+      std::remove_if(
+        monitored_subscriptions_.begin(),
+        monitored_subscriptions_.end(),
+        [this](const auto & item) { return topics_.find(item.first) == topics_.end(); }),
+      monitored_subscriptions_.end());
 
-    entry.name = name;
-    entry.type = types.empty() ? "<unknown>" : types.front();
-    refreshed[name] = std::move(entry);
+    selected_index_ = std::clamp(selected_index_, 0, std::max(0, static_cast<int>(topics_.size()) - 1));
+    last_refresh_time_ = TopicClock::now();
+    status_line_ = "Loaded " + std::to_string(topics_.size()) + " topics. Space monitors the selected topic.";
   }
 
-  topics_.swap(refreshed);
-  monitored_subscriptions_.erase(
-    std::remove_if(
-      monitored_subscriptions_.begin(),
-      monitored_subscriptions_.end(),
-      [this](const auto & item) { return topics_.find(item.first) == topics_.end(); }),
-    monitored_subscriptions_.end());
+  select_initial_topic_if_present();
+}
 
-  selected_index_ = std::clamp(selected_index_, 0, std::max(0, static_cast<int>(topics_.size()) - 1));
-  last_refresh_time_ = TopicClock::now();
-  status_line_ = "Loaded " + std::to_string(topics_.size()) + " topics. Space monitors the selected topic.";
+void TopicMonitorBackend::select_initial_topic_if_present() {
+  if (initial_topic_name_.empty()) {
+    return;
+  }
+
+  const auto items = visible_topic_items();
+  for (std::size_t index = 0; index < items.size(); ++index) {
+    if (!items[index].is_namespace && items[index].row.name == initial_topic_name_) {
+      selected_index_ = static_cast<int>(index);
+      initial_topic_name_.clear();
+      return;
+    }
+  }
 }
 
 void TopicMonitorBackend::warm_up_topic_list() {

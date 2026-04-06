@@ -1,8 +1,26 @@
 #include "ros2_console_tools/topic_monitor.hpp"
 
 #include <ncursesw/ncurses.h>
+#include <thread>
 
 namespace ros2_console_tools {
+
+int run_topic_monitor_tool(const std::string & initial_topic) {
+  auto backend = std::make_shared<TopicMonitorBackend>(initial_topic);
+  TopicMonitorScreen screen(backend);
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(backend);
+  std::thread spin_thread([&executor]() { executor.spin(); });
+
+  const int result = screen.run();
+
+  executor.cancel();
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+  return result;
+}
 
 namespace {
 

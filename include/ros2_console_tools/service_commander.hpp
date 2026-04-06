@@ -24,6 +24,8 @@
 
 namespace ros2_console_tools {
 
+int run_service_commander_tool(const std::string & initial_service = "");
+
 using MessageMember = rosidl_typesupport_introspection_cpp::MessageMember;
 using MessageMembers = rosidl_typesupport_introspection_cpp::MessageMembers;
 using ServiceMembers = rosidl_typesupport_introspection_cpp::ServiceMembers;
@@ -87,7 +89,7 @@ class ServiceCommanderScreen;
 
 class ServiceCommanderBackend : public rclcpp::Node {
 public:
-  ServiceCommanderBackend();
+  explicit ServiceCommanderBackend(const std::string & initial_service = "");
 
 private:
   friend class ServiceCommanderScreen;
@@ -104,6 +106,7 @@ private:
   const RequestRow * selected_request_row() const;
   bool request_row_is_editable(const RequestRow & row) const;
   bool set_selected_request_value(const std::string & value_text);
+  void select_initial_service_if_present();
   std::vector<DetailRow> flatten_message(const MessageMembers * members, const void * message_memory) const;
   std::vector<RequestRow> flatten_request_message(const MessageMembers * members, void * message_memory) const;
   void append_message_members(
@@ -124,6 +127,8 @@ private:
 
   std::vector<ServiceEntry> services_;
   std::map<std::string, ServiceIntrospection> introspection_cache_;
+  std::string initial_service_name_;
+  bool auto_open_initial_service_{false};
   ServiceCommanderViewMode view_mode_{ServiceCommanderViewMode::ServiceList};
   int selected_service_index_{0};
   int service_scroll_{0};

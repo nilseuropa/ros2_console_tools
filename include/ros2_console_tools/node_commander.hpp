@@ -16,6 +16,13 @@
 
 namespace ros2_console_tools {
 
+enum class NodeDetailAction {
+  None,
+  OpenParameters,
+  OpenTopicMonitor,
+  OpenServiceCommander,
+};
+
 struct GraphEndpoint {
   std::string name;
   std::string type;
@@ -32,6 +39,13 @@ struct NodeDetails {
 struct DetailLine {
   std::string text;
   bool is_header{false};
+  NodeDetailAction action{NodeDetailAction::None};
+  std::string target;
+};
+
+enum class NodeCommanderFocusPane {
+  NodeList,
+  DetailPane,
 };
 
 class NodeCommanderScreen;
@@ -68,14 +82,21 @@ private:
   bool handle_key(int key);
   bool handle_search_key(int key);
   int page_step() const;
+  bool launch_selected_node_parameters();
+  bool launch_selected_detail_action();
+  const DetailLine * selected_detail_line() const;
   void draw();
   void draw_node_list(int top, int left, int bottom, int right);
-  void draw_detail_pane(int top, int left, int bottom, int right) const;
+  void draw_detail_pane(int top, int left, int bottom, int right);
   void draw_status_line(int row, int columns) const;
   void draw_help_line(int row, int columns) const;
 
   std::shared_ptr<NodeCommanderBackend> backend_;
   tui::SearchState search_state_;
+  NodeCommanderFocusPane focus_pane_{NodeCommanderFocusPane::NodeList};
+  int detail_selected_index_{0};
+  int detail_scroll_{0};
+  std::vector<DetailLine> detail_lines_cache_;
 };
 
 }  // namespace ros2_console_tools

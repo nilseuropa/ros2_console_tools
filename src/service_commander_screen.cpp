@@ -3,12 +3,30 @@
 #include <ncursesw/ncurses.h>
 
 #include <algorithm>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "ros2_console_tools/tui.hpp"
 
 namespace ros2_console_tools {
+
+int run_service_commander_tool(const std::string & initial_service) {
+  auto backend = std::make_shared<ServiceCommanderBackend>(initial_service);
+  ServiceCommanderScreen screen(backend);
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(backend);
+  std::thread spin_thread([&executor]() { executor.spin(); });
+
+  const int result = screen.run();
+
+  executor.cancel();
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+  return result;
+}
 
 namespace {
 

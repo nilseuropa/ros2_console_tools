@@ -121,7 +121,12 @@ ament_target_dependencies(node_commander_lib
   rclcpp
 )
 target_include_directories(node_commander_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
-target_link_libraries(node_commander_lib ${NCURSESW_LIBRARY})
+target_link_libraries(
+  node_commander_lib
+  ${NCURSESW_LIBRARY}
+  parameter_commander_lib
+  topic_monitor_lib
+)
 
 add_executable(node_commander src/node_commander.cpp)
 ament_target_dependencies(node_commander
@@ -159,6 +164,8 @@ target_link_libraries(service_commander service_commander_lib)
 install(TARGETS service_commander_lib service_commander
   DESTINATION lib/${PROJECT_NAME}
 )
+
+target_link_libraries(node_commander_lib service_commander_lib)
 
 add_library(tf_monitor_lib
   src/tf_monitor_backend.cpp

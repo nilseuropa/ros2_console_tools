@@ -8,8 +8,10 @@
 
 namespace ros2_console_tools {
 
-ServiceCommanderBackend::ServiceCommanderBackend()
-: Node("service_commander")
+ServiceCommanderBackend::ServiceCommanderBackend(const std::string & initial_service)
+: Node("service_commander"),
+  initial_service_name_(initial_service),
+  auto_open_initial_service_(!initial_service.empty())
 {
   const std::string theme_config_path =
     this->declare_parameter<std::string>("theme_config_path", tui::default_theme_config_path());
@@ -45,7 +47,26 @@ void ServiceCommanderBackend::refresh_services() {
 
   services_ = std::move(refreshed);
   clamp_service_selection();
+  select_initial_service_if_present();
   status_line_ = "Loaded " + std::to_string(services_.size()) + " services. Enter inspects a service.";
+}
+
+void ServiceCommanderBackend::select_initial_service_if_present() {
+  if (initial_service_name_.empty()) {
+    return;
+  }
+
+  for (std::size_t index = 0; index < services_.size(); ++index) {
+    if (services_[index].name == initial_service_name_) {
+      selected_service_index_ = static_cast<int>(index);
+      initial_service_name_.clear();
+      if (auto_open_initial_service_) {
+        auto_open_initial_service_ = false;
+        open_selected_service();
+      }
+      return;
+    }
+  }
 }
 
 void ServiceCommanderBackend::clamp_service_selection() {

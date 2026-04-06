@@ -89,26 +89,36 @@ std::vector<DetailLine> NodeCommanderBackend::selected_node_details() const {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (node_entries_.empty() || selected_index_ < 0 || selected_index_ >= static_cast<int>(node_entries_.size())) {
-      return {{"No node selected.", false}};
+      return {{"No node selected.", false, NodeDetailAction::None, ""}};
     }
     selected_node = node_entries_[static_cast<std::size_t>(selected_index_)];
   }
 
   const NodeDetails details = build_node_details(selected_node);
   std::vector<DetailLine> lines;
-  lines.push_back({"Node", true});
-  lines.push_back({details.node_name, false});
-  lines.push_back({"Parameter Services", true});
-  lines.push_back({details.parameter_services_ready ? "available" : "unavailable", false});
+  lines.push_back({"Node", true, NodeDetailAction::None, ""});
+  lines.push_back({details.node_name, false, NodeDetailAction::OpenParameters, details.node_name});
+  lines.push_back({"Parameter Services", true, NodeDetailAction::None, ""});
+  lines.push_back({
+    details.parameter_services_ready ? "available" : "unavailable",
+    false,
+    NodeDetailAction::OpenParameters,
+    details.node_name});
 
   auto append_section = [&lines](const std::string & title, const std::vector<GraphEndpoint> & entries) {
-    lines.push_back({title, true});
+    lines.push_back({title, true, NodeDetailAction::None, ""});
     if (entries.empty()) {
-      lines.push_back({"-", false});
+      lines.push_back({"-", false, NodeDetailAction::None, ""});
       return;
     }
     for (const auto & entry : entries) {
-      lines.push_back({entry.name + " [" + entry.type + "]", false});
+      NodeDetailAction action = NodeDetailAction::None;
+      if (title == "Publishers" || title == "Subscribers") {
+        action = NodeDetailAction::OpenTopicMonitor;
+      } else if (title == "Services") {
+        action = NodeDetailAction::OpenServiceCommander;
+      }
+      lines.push_back({entry.name + " [" + entry.type + "]", false, action, entry.name});
     }
   };
 

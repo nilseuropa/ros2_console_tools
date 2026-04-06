@@ -21,6 +21,8 @@
 
 namespace ros2_console_tools {
 
+int run_parameter_commander_tool(const std::string & target_node = "");
+
 using ParameterDescriptor = rcl_interfaces::msg::ParameterDescriptor;
 using ParameterType = rcl_interfaces::msg::ParameterType;
 

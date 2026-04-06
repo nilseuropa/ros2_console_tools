@@ -32,6 +32,8 @@
 
 namespace ros2_console_tools {
 
+int run_topic_monitor_tool(const std::string & initial_topic = "");
+
 using TopicClock = std::chrono::steady_clock;
 using MessageMember = rosidl_typesupport_introspection_cpp::MessageMember;
 using MessageMembers = rosidl_typesupport_introspection_cpp::MessageMembers;
@@ -163,7 +165,7 @@ class TopicMonitorScreen;
 
 class TopicMonitorBackend : public rclcpp::Node {
 public:
-  TopicMonitorBackend();
+  explicit TopicMonitorBackend(const std::string & initial_topic = "");
 
 private:
   friend class TopicMonitorScreen;
@@ -206,6 +208,7 @@ private:
   void expand_selected_namespace();
   void collapse_selected_namespace();
   void clamp_detail_selection(const std::vector<DetailRow> & rows);
+  void select_initial_topic_if_present();
 
   mutable std::mutex mutex_;
   std::map<std::string, TopicEntry> topics_;
@@ -213,6 +216,7 @@ private:
   std::map<std::string, bool> collapsed_topic_namespaces_;
   std::vector<std::pair<std::string, rclcpp::GenericSubscription::SharedPtr>> monitored_subscriptions_;
   TopicMonitorViewMode view_mode_{TopicMonitorViewMode::TopicList};
+  std::string initial_topic_name_;
   int selected_index_{0};
   int list_scroll_{0};
   int selected_detail_index_{0};

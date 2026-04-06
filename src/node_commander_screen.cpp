@@ -2,7 +2,14 @@
 
 #include <ncursesw/ncurses.h>
 
+#include <algorithm>
+#include <utility>
+
 namespace ros2_console_tools {
+
+int run_parameter_commander_tool(const std::string & target_node);
+int run_topic_monitor_tool(const std::string & initial_topic);
+int run_service_commander_tool(const std::string & initial_service);
 
 namespace {
 
@@ -11,6 +18,7 @@ enum ColorPairId {
   kColorTitle = tui::kColorTitle,
   kColorHeader = tui::kColorHeader,
   kColorSelection = tui::kColorSelection,
+  kColorAccent = tui::kColorAccent,
 };
 
 using tui::Session;
@@ -26,6 +34,15 @@ using tui::is_alt_binding;
 using tui::SearchInputResult;
 using tui::start_search;
 using tui::truncate_text;
+
+void resume_parent_screen() {
+  reset_prog_mode();
+  refresh();
+  clear();
+  clearok(stdscr, TRUE);
+  curs_set(0);
+  timeout(100);
+}
 
 }  // namespace
 
@@ -62,36 +79,72 @@ bool NodeCommanderScreen::handle_key(int key) {
     case KEY_F(4):
       backend_->refresh_nodes();
       return true;
+    case '\t':
+      focus_pane_ = focus_pane_ == NodeCommanderFocusPane::NodeList
+        ? NodeCommanderFocusPane::DetailPane
+        : NodeCommanderFocusPane::NodeList;
+      if (focus_pane_ == NodeCommanderFocusPane::DetailPane) {
+        for (std::size_t index = 0; index < detail_lines_cache_.size(); ++index) {
+          if (!detail_lines_cache_[index].is_header && detail_lines_cache_[index].action != NodeDetailAction::None) {
+            detail_selected_index_ = static_cast<int>(index);
+            break;
+          }
+        }
+      }
+      return true;
     case 27:
       if (is_alt_binding(key, 's')) {
         start_search(search_state_);
         std::lock_guard<std::mutex> lock(backend_->mutex_);
         backend_->status_line_ = "Search.";
-        return true;
       }
       return true;
     case KEY_UP:
     case 'k':
-      if (backend_->selected_index_ > 0) {
-        --backend_->selected_index_;
+      if (focus_pane_ == NodeCommanderFocusPane::NodeList) {
+        if (backend_->selected_index_ > 0) {
+          --backend_->selected_index_;
+        }
+      } else if (detail_selected_index_ > 0) {
+        --detail_selected_index_;
       }
       return true;
     case KEY_DOWN:
     case 'j':
-      if (backend_->selected_index_ + 1 < static_cast<int>(backend_->node_entries_.size())) {
-        ++backend_->selected_index_;
+      if (focus_pane_ == NodeCommanderFocusPane::NodeList) {
+        if (backend_->selected_index_ + 1 < static_cast<int>(backend_->node_entries_.size())) {
+          ++backend_->selected_index_;
+        }
+      } else if (detail_selected_index_ + 1 < static_cast<int>(detail_lines_cache_.size())) {
+        ++detail_selected_index_;
       }
       return true;
     case KEY_PPAGE:
-      backend_->selected_index_ = std::max(0, backend_->selected_index_ - page_step());
-      return true;
-    case KEY_NPAGE:
-      if (!backend_->node_entries_.empty()) {
-        backend_->selected_index_ = std::min(
-          static_cast<int>(backend_->node_entries_.size()) - 1,
-          backend_->selected_index_ + page_step());
+      if (focus_pane_ == NodeCommanderFocusPane::NodeList) {
+        backend_->selected_index_ = std::max(0, backend_->selected_index_ - page_step());
+      } else {
+        detail_selected_index_ = std::max(0, detail_selected_index_ - page_step());
       }
       return true;
+    case KEY_NPAGE:
+      if (focus_pane_ == NodeCommanderFocusPane::NodeList) {
+        if (!backend_->node_entries_.empty()) {
+          backend_->selected_index_ = std::min(
+            static_cast<int>(backend_->node_entries_.size()) - 1,
+            backend_->selected_index_ + page_step());
+        }
+      } else if (!detail_lines_cache_.empty()) {
+        detail_selected_index_ = std::min(
+          static_cast<int>(detail_lines_cache_.size()) - 1,
+          detail_selected_index_ + page_step());
+      }
+      return true;
+    case '\n':
+    case KEY_ENTER:
+      if (focus_pane_ == NodeCommanderFocusPane::NodeList) {
+        return launch_selected_node_parameters();
+      }
+      return launch_selected_detail_action();
     default:
       return true;
   }
@@ -130,6 +183,72 @@ int NodeCommanderScreen::page_step() const {
   return std::max(5, rows - 8);
 }
 
+bool NodeCommanderScreen::launch_selected_node_parameters() {
+  std::string selected_node;
+  {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    if (backend_->node_entries_.empty() ||
+      backend_->selected_index_ < 0 ||
+      backend_->selected_index_ >= static_cast<int>(backend_->node_entries_.size()))
+    {
+      backend_->status_line_ = "No node selected.";
+      return true;
+    }
+    selected_node = backend_->node_entries_[static_cast<std::size_t>(backend_->selected_index_)];
+  }
+
+  def_prog_mode();
+  endwin();
+  (void)run_parameter_commander_tool(selected_node);
+  resume_parent_screen();
+  {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Returned from parameter_commander for " + selected_node + ".";
+  }
+  return true;
+}
+
+bool NodeCommanderScreen::launch_selected_detail_action() {
+  const DetailLine * line = selected_detail_line();
+  if (line == nullptr || line->is_header || line->action == NodeDetailAction::None) {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "No actionable item selected.";
+    return true;
+  }
+
+  def_prog_mode();
+  endwin();
+  switch (line->action) {
+    case NodeDetailAction::OpenParameters:
+      (void)run_parameter_commander_tool(line->target);
+      break;
+    case NodeDetailAction::OpenTopicMonitor:
+      (void)run_topic_monitor_tool(line->target);
+      break;
+    case NodeDetailAction::OpenServiceCommander:
+      (void)run_service_commander_tool(line->target);
+      break;
+    case NodeDetailAction::None:
+      break;
+  }
+  resume_parent_screen();
+  {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Returned to node_commander.";
+  }
+  return true;
+}
+
+const DetailLine * NodeCommanderScreen::selected_detail_line() const {
+  if (detail_lines_cache_.empty() ||
+    detail_selected_index_ < 0 ||
+    detail_selected_index_ >= static_cast<int>(detail_lines_cache_.size()))
+  {
+    return nullptr;
+  }
+  return &detail_lines_cache_[static_cast<std::size_t>(detail_selected_index_)];
+}
+
 void NodeCommanderScreen::draw() {
   erase();
 
@@ -138,7 +257,7 @@ void NodeCommanderScreen::draw() {
   getmaxyx(stdscr, rows, columns);
   const int help_row = rows - 1;
   const int status_row = rows - 2;
-  const int content_bottom = std::max(1, status_row - 1);
+  const int content_bottom = rows - 3;
 
   draw_box(0, 0, content_bottom, columns - 1, kColorFrame);
   attron(COLOR_PAIR(kColorTitle));
@@ -171,7 +290,7 @@ void NodeCommanderScreen::draw_node_list(int top, int left, int bottom, int righ
   }
 
   attron(COLOR_PAIR(kColorHeader));
-  mvprintw(top, left, "%-*s", width, "Nodes");
+  mvprintw(top, left, "%-*s", width, focus_pane_ == NodeCommanderFocusPane::NodeList ? "Nodes <" : "Nodes");
   attroff(COLOR_PAIR(kColorHeader));
 
   const int first_row = backend_->node_scroll_;
@@ -195,27 +314,53 @@ void NodeCommanderScreen::draw_node_list(int top, int left, int bottom, int righ
   }
 }
 
-void NodeCommanderScreen::draw_detail_pane(int top, int left, int bottom, int right) const {
+void NodeCommanderScreen::draw_detail_pane(int top, int left, int bottom, int right) {
   const int width = right - left + 1;
-  const auto lines = backend_->selected_node_details();
+  detail_lines_cache_ = backend_->selected_node_details();
+
+  if (detail_lines_cache_.empty()) {
+    detail_selected_index_ = 0;
+    detail_scroll_ = 0;
+  } else {
+    detail_selected_index_ = std::clamp(detail_selected_index_, 0, static_cast<int>(detail_lines_cache_.size()) - 1);
+  }
+
+  const int visible_rows = std::max(1, bottom - top);
+  if (detail_selected_index_ < detail_scroll_) {
+    detail_scroll_ = detail_selected_index_;
+  }
+  if (detail_selected_index_ >= detail_scroll_ + visible_rows) {
+    detail_scroll_ = std::max(0, detail_selected_index_ - visible_rows + 1);
+  }
 
   attron(COLOR_PAIR(kColorHeader));
-  mvprintw(top, left, "%-*s", width, "Details");
+  mvprintw(top, left, "%-*s", width, focus_pane_ == NodeCommanderFocusPane::DetailPane ? "Details <" : "Details");
   attroff(COLOR_PAIR(kColorHeader));
 
   int row_y = top + 1;
-  for (const auto & line : lines) {
-    if (row_y > bottom) {
-      break;
+  const int first_row = detail_scroll_;
+  const int last_row = std::min(static_cast<int>(detail_lines_cache_.size()), first_row + visible_rows);
+  for (int index = first_row; index < last_row && row_y <= bottom; ++index, ++row_y) {
+    const auto & line = detail_lines_cache_[static_cast<std::size_t>(index)];
+    const bool selected = focus_pane_ == NodeCommanderFocusPane::DetailPane && index == detail_selected_index_;
+    mvhline(row_y, left, ' ', width);
+    if (selected) {
+      mvchgat(row_y, left, width, A_NORMAL, kColorSelection, nullptr);
     }
     if (line.is_header) {
       attron(COLOR_PAIR(kColorHeader));
       mvprintw(row_y, left, "%-*s", width, truncate_text(line.text, width).c_str());
       attroff(COLOR_PAIR(kColorHeader));
+    } else if (line.action != NodeDetailAction::None) {
+      attron(COLOR_PAIR(kColorAccent));
+      mvprintw(row_y, left, "%-*s", width, truncate_text(line.text, width).c_str());
+      attroff(COLOR_PAIR(kColorAccent));
     } else {
       mvprintw(row_y, left, "%-*s", width, truncate_text(line.text, width).c_str());
     }
-    ++row_y;
+    if (selected) {
+      mvchgat(row_y, left, width, A_NORMAL, kColorSelection, nullptr);
+    }
   }
   for (; row_y <= bottom; ++row_y) {
     mvhline(row_y, left, ' ', width);
@@ -238,7 +383,7 @@ void NodeCommanderScreen::draw_status_line(int row, int columns) const {
 }
 
 void NodeCommanderScreen::draw_help_line(int row, int columns) const {
-  draw_help_bar(row, columns, "Alt+S Search  F4 Refresh  F10 Exit");
+  draw_help_bar(row, columns, "Enter Open  Tab Pane  Alt+S Search  F4 Refresh  F10 Exit");
 }
 
 }  // namespace ros2_console_tools
