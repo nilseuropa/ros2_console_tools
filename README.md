@@ -267,6 +267,34 @@ Current limitation:
 - request editing is currently intended for scalar fields
 - arrays and more advanced structured editing still need dedicated UI work
 
+### node_commander
+
+Binary:
+
+```bash
+ros2 run ros2_console_tools node_commander
+```
+
+Purpose:
+
+- inspect the live ROS 2 node graph
+- browse nodes and their graph interfaces
+- check whether parameter services are reachable
+
+Highlights:
+
+- node list on the left
+- detail pane with publishers, subscribers, and services
+- parameter service availability indicator
+- shared incremental `Alt+S` search
+
+Main files:
+
+- [include/ros2_console_tools/node_commander.hpp](/home/nils/dev_ws/src/ros2_console_tools/include/ros2_console_tools/node_commander.hpp)
+- [src/node_commander_backend.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/node_commander_backend.cpp)
+- [src/node_commander_screen.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/node_commander_screen.cpp)
+- [src/node_commander.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/node_commander.cpp)
+
 ### log_viewer
 
 Binary:
@@ -393,7 +421,7 @@ The intended path is:
 3. standardize screen-level interfaces
 4. later host multiple screens inside a top-level `ros2_commander`
 
-The current refactoring work already supports this direction.
+The current code structure already supports this direction.
 
 ## Legacy / Not Yet Conforming
 

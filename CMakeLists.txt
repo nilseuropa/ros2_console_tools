@@ -111,6 +111,30 @@ install(TARGETS log_viewer_lib log_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_library(node_commander_lib
+  src/node_commander_backend.cpp
+  src/node_commander_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(node_commander_lib
+  ament_index_cpp
+  rclcpp
+)
+target_include_directories(node_commander_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(node_commander_lib ${NCURSESW_LIBRARY})
+
+add_executable(node_commander src/node_commander.cpp)
+ament_target_dependencies(node_commander
+  ament_index_cpp
+  rclcpp
+)
+target_include_directories(node_commander PRIVATE ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(node_commander node_commander_lib)
+
+install(TARGETS node_commander_lib node_commander
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 add_library(service_commander_lib
   src/service_commander_backend.cpp
   src/service_commander_screen.cpp
