@@ -1,5 +1,7 @@
 #include "ros2_console_tools/topic_monitor.hpp"
 
+#include "ros2_console_tools/map_viewer.hpp"
+
 #include <ncursesw/ncurses.h>
 #include <thread>
 
@@ -95,6 +97,8 @@ bool TopicMonitorScreen::handle_topic_list_key(int key) {
   switch (key) {
     case KEY_F(10):
       return false;
+    case KEY_F(2):
+      return launch_selected_visualizer();
     case KEY_F(4):
       backend_->refresh_topics();
       return true;
@@ -194,6 +198,8 @@ bool TopicMonitorScreen::handle_topic_detail_key(int key) {
   switch (key) {
     case KEY_F(10):
       return false;
+    case KEY_F(2):
+      return launch_selected_visualizer();
     case 27:
       if (embedded_mode_) {
         return false;
@@ -235,6 +241,55 @@ int TopicMonitorScreen::page_step() const {
   getmaxyx(stdscr, rows, columns);
   (void)columns;
   return std::max(5, rows - 8);
+}
+
+bool TopicMonitorScreen::launch_selected_visualizer() {
+  std::string topic_name;
+  std::string topic_type;
+
+  if (backend_->view_mode_ == TopicMonitorViewMode::TopicDetail) {
+    topic_name = backend_->detail_topic_name_;
+    auto found = backend_->topics_.find(topic_name);
+    if (found != backend_->topics_.end()) {
+      topic_type = found->second.type;
+    }
+  } else {
+    const auto items = backend_->visible_topic_items();
+    backend_->clamp_topic_selection(items);
+    if (items.empty() || backend_->selected_index_ < 0 || backend_->selected_index_ >= static_cast<int>(items.size())) {
+      backend_->status_line_ = "No topic selected.";
+      return true;
+    }
+    const auto & item = items[static_cast<std::size_t>(backend_->selected_index_)];
+    if (item.is_namespace) {
+      backend_->status_line_ = "Select a topic, not a folder.";
+      return true;
+    }
+    topic_name = item.row.name;
+    topic_type = item.row.type;
+  }
+
+  if (topic_name.empty()) {
+    backend_->status_line_ = "No topic selected.";
+    return true;
+  }
+
+  if (topic_type == "nav_msgs/msg/OccupancyGrid") {
+    def_prog_mode();
+    endwin();
+    (void)run_map_viewer_tool(topic_name);
+    reset_prog_mode();
+    refresh();
+    clear();
+    clearok(stdscr, TRUE);
+    curs_set(0);
+    timeout(100);
+    backend_->status_line_ = "Returned from map_viewer for " + topic_name + ".";
+    return true;
+  }
+
+  backend_->status_line_ = "No visualizer available for " + topic_type + ".";
+  return true;
 }
 
 void TopicMonitorScreen::draw() {
@@ -457,8 +512,8 @@ void TopicMonitorScreen::draw_status_line(int row, int columns) const {
 void TopicMonitorScreen::draw_help_line(int row, int columns) const {
   const std::string help =
     backend_->view_mode_ == TopicMonitorViewMode::TopicDetail
-    ? "Esc Back  F4 Refresh  F10 Exit"
-    : "Enter Inspect  Alt+S Search  Space Mark  F4 Refresh  F5 Filter  F10 Exit";
+    ? "F2 Visualize  Esc Back  F4 Refresh  F10 Exit"
+    : "Enter Inspect  F2 Visualize  Alt+S Search  Space Mark  F4 Refresh  F5 Filter  F10 Exit";
   draw_help_bar(row, columns, help);
 }
 

@@ -82,7 +82,7 @@ ament_target_dependencies(topic_monitor_lib
   rosidl_typesupport_introspection_cpp
 )
 target_include_directories(topic_monitor_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
-target_link_libraries(topic_monitor_lib ${NCURSESW_LIBRARY})
+target_link_libraries(topic_monitor_lib ${NCURSESW_LIBRARY} map_viewer_lib)
 
 add_executable(topic_monitor src/topic_monitor.cpp)
 ament_target_dependencies(topic_monitor

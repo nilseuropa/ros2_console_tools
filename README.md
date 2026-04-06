@@ -9,170 +9,36 @@ The package contains several standalone ncurses-based tools with a shared TUI la
 - provide practical ROS 2 operator tools in the terminal
 - keep behavior consistent across tools
 - allow each tool to run standalone today
-- leave a clean path toward a future integrated `ros2_commander`
-
-## Current Architecture
-
-Most tools now follow the same 3-layer structure:
-
-1. `tui`
-   Shared terminal infrastructure in:
-   - [include/ros2_console_tools/tui.hpp](/home/nils/dev_ws/src/ros2_console_tools/include/ros2_console_tools/tui.hpp)
-   - [src/tui.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/tui.cpp)
-
-   Responsibilities:
-   - ncurses session setup/teardown
-   - Unicode-safe line drawing with fallback behavior
-   - global theme/color roles
-   - status/help bar rendering
-   - popup help-bar rendering
-   - incremental `Alt+S` search support
-
-2. `backend`
-   ROS-facing logic and tool state.
-
-   Responsibilities:
-   - node creation
-   - subscriptions/clients/service calls
-   - data refresh and caching
-   - domain-specific model preparation for the screen
-
-   This layer should avoid ncurses concerns as much as possible.
-
-3. `screen`
-   TUI controller/view.
-
-   Responsibilities:
-   - key handling
-   - list navigation
-   - pane and popup drawing
-   - selection/search/edit workflows
-
-4. thin executable wrapper
-   The executable `main()` should do only:
-   - `rclcpp::init`
-   - create backend
-   - create screen
-   - run executor thread
-   - run screen loop
-   - shutdown cleanly
-
-## Tool Structure
-
-For a tool following the current structure, the files should look like this:
-
-- `include/ros2_console_tools/<tool>.hpp`
-- `src/<tool>_backend.cpp`
-- `src/<tool>_screen.cpp`
-- `src/<tool>.cpp`
-
-The CMake layout should also follow the same pattern:
-
-- `<tool>_lib`
-  Contains backend + screen + shared `tui.cpp`
-- `<tool>`
-  Thin executable linked against `<tool>_lib`
-
-## Expansion API
-
-The current implementation already gives a clear template for adding new tools.
-
-### 1. Add a public header
-
-Define:
-
-- domain structs used by backend/screen
-- `Backend : public rclcpp::Node`
-- `Screen`
-
-Typical shape:
-
-```cpp
-class ExampleScreen;
-
-class ExampleBackend : public rclcpp::Node {
-public:
-  ExampleBackend();
-
-private:
-  friend class ExampleScreen;
-
-  void refresh();
-  void set_status(const std::string & text);
-
-  std::string status_line_;
-};
-
-class ExampleScreen {
-public:
-  explicit ExampleScreen(std::shared_ptr<ExampleBackend> backend);
-  int run();
-
-private:
-  bool handle_key(int key);
-  void draw();
-
-  std::shared_ptr<ExampleBackend> backend_;
-  tui::SearchState search_state_;
-};
-```
-
-### 2. Keep backend ownership clear
-
-The backend should own:
-
-- ROS interfaces
-- cached data
-- selected domain objects
-- refresh/load/save/call logic
-
-The screen should not duplicate backend state unless it is strictly UI-local, such as:
-
-- popup open/closed flags
-- temporary edit buffers
-- search state
-- local scroll state for a popup
-
-### 3. Reuse the shared TUI
-
-Prefer the shared TUI helpers instead of per-tool ad hoc rendering:
-
-- `tui::Session`
-- `tui::draw_box`
-- `tui::draw_status_bar`
-- `tui::draw_help_bar`
-- `tui::draw_help_bar_region`
-- `tui::draw_search_box`
-- `tui::find_best_match`
-- `tui::handle_search_input`
-
-### 4. Keep keybindings consistent
-
-Default conventions currently in use:
-
-- `F10`: exit
-- `Esc`: back/close
-- `Enter`: inspect/open/edit depending on context
-- `Alt+S`: incremental search
-- `F4`: refresh current scope
-- `F2`: primary action in current context
-- `F3`: secondary non-destructive action in current context
-- `Space`: mark/select where multiselect or monitoring exists
-- `Left` / `Right`: fold/unfold tree structures
-
-New tools should follow these unless there is a strong reason not to.
-
-### 5. Prefer additive evolution
-
-The package is moving toward a future `ros2_commander`, but tools should still be useful standalone.
-
-That means:
-
-- keep each tool independently runnable
-- factor shared behavior into `tui`
-- avoid pushing unrelated workflows into one tool prematurely
 
 ## Tools
+
+### node_commander
+
+Binary:
+
+```bash
+ros2 run ros2_console_tools node_commander
+```
+
+Purpose:
+
+- inspect the live ROS 2 node graph
+- browse nodes and their graph interfaces
+- check whether parameter services are reachable
+
+Highlights:
+
+- node list on the left
+- detail pane with publishers, subscribers, and services
+- parameter service availability indicator
+- shared incremental `Alt+S` search
+
+Main files:
+
+- [include/ros2_console_tools/node_commander.hpp](/home/nils/dev_ws/src/ros2_console_tools/include/ros2_console_tools/node_commander.hpp)
+- [src/node_commander_backend.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/node_commander_backend.cpp)
+- [src/node_commander_screen.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/node_commander_screen.cpp)
+- [src/node_commander.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/node_commander.cpp)
 
 ### parameter_commander
 
@@ -266,34 +132,6 @@ Current limitation:
 
 - request editing is currently intended for scalar fields
 - arrays and more advanced structured editing still need dedicated UI work
-
-### node_commander
-
-Binary:
-
-```bash
-ros2 run ros2_console_tools node_commander
-```
-
-Purpose:
-
-- inspect the live ROS 2 node graph
-- browse nodes and their graph interfaces
-- check whether parameter services are reachable
-
-Highlights:
-
-- node list on the left
-- detail pane with publishers, subscribers, and services
-- parameter service availability indicator
-- shared incremental `Alt+S` search
-
-Main files:
-
-- [include/ros2_console_tools/node_commander.hpp](/home/nils/dev_ws/src/ros2_console_tools/include/ros2_console_tools/node_commander.hpp)
-- [src/node_commander_backend.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/node_commander_backend.cpp)
-- [src/node_commander_screen.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/node_commander_screen.cpp)
-- [src/node_commander.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/node_commander.cpp)
 
 ### log_viewer
 
@@ -424,6 +262,68 @@ Main files:
 - [src/map_viewer_screen.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/map_viewer_screen.cpp)
 - [src/map_viewer.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/map_viewer.cpp)
 
+## Current Architecture
+
+Most tools now follow the same 3-layer structure:
+
+1. `tui`
+   Shared terminal infrastructure in:
+   - [include/ros2_console_tools/tui.hpp](/home/nils/dev_ws/src/ros2_console_tools/include/ros2_console_tools/tui.hpp)
+   - [src/tui.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/tui.cpp)
+
+   Responsibilities:
+   - ncurses session setup/teardown
+   - Unicode-safe line drawing with fallback behavior
+   - global theme/color roles
+   - status/help bar rendering
+   - popup help-bar rendering
+   - incremental `Alt+S` search support
+
+2. `backend`
+   ROS-facing logic and tool state.
+
+   Responsibilities:
+   - node creation
+   - subscriptions/clients/service calls
+   - data refresh and caching
+   - domain-specific model preparation for the screen
+
+   This layer should avoid ncurses concerns as much as possible.
+
+3. `screen`
+   TUI controller/view.
+
+   Responsibilities:
+   - key handling
+   - list navigation
+   - pane and popup drawing
+   - selection/search/edit workflows
+
+4. thin executable wrapper
+   The executable `main()` should do only:
+   - `rclcpp::init`
+   - create backend
+   - create screen
+   - run executor thread
+   - run screen loop
+   - shutdown cleanly
+
+## Tool Structure
+
+For a tool following the current structure, the files should look like this:
+
+- `include/ros2_console_tools/<tool>.hpp`
+- `src/<tool>_backend.cpp`
+- `src/<tool>_screen.cpp`
+- `src/<tool>.cpp`
+
+The CMake layout should also follow the same pattern:
+
+- `<tool>_lib`
+  Contains backend + screen + shared `tui.cpp`
+- `<tool>`
+  Thin executable linked against `<tool>_lib`
+
 ## Shared TUI Layer
 
 The shared TUI is the most important foundation for future growth.
@@ -445,15 +345,97 @@ Future work should continue moving common UI behavior here, for example:
 - reusable code/text viewers
 - configuration-driven theming
 
-## Toward ros2_commander
+## Expansion API
 
-The package is now close to supporting a higher-level integrated shell.
+The current implementation already gives a clear template for adding new tools.
 
-The intended path is:
+### 1. Add a public header
 
-1. keep standalone tools working
-2. continue extracting shared UI patterns into `tui`
-3. standardize screen-level interfaces
-4. later host multiple screens inside a top-level `ros2_commander`
+Define:
 
-The current code structure already supports this direction.
+- domain structs used by backend/screen
+- `Backend : public rclcpp::Node`
+- `Screen`
+
+Typical shape:
+
+```cpp
+class ExampleScreen;
+
+class ExampleBackend : public rclcpp::Node {
+public:
+  ExampleBackend();
+
+private:
+  friend class ExampleScreen;
+
+  void refresh();
+  void set_status(const std::string & text);
+
+  std::string status_line_;
+};
+
+class ExampleScreen {
+public:
+  explicit ExampleScreen(std::shared_ptr<ExampleBackend> backend);
+  int run();
+
+private:
+  bool handle_key(int key);
+  void draw();
+
+  std::shared_ptr<ExampleBackend> backend_;
+  tui::SearchState search_state_;
+};
+```
+
+### 2. Keep backend ownership clear
+
+The backend should own:
+
+- ROS interfaces
+- cached data
+- selected domain objects
+- refresh/load/save/call logic
+
+The screen should not duplicate backend state unless it is strictly UI-local, such as:
+
+- popup open/closed flags
+- temporary edit buffers
+- search state
+- local scroll state for a popup
+
+### 3. Reuse the shared TUI
+
+Prefer the shared TUI helpers instead of per-tool ad hoc rendering:
+
+- `tui::Session`
+- `tui::draw_box`
+- `tui::draw_status_bar`
+- `tui::draw_help_bar`
+- `tui::draw_help_bar_region`
+- `tui::draw_search_box`
+- `tui::find_best_match`
+- `tui::handle_search_input`
+
+### 4. Keep keybindings consistent
+
+Default conventions currently in use:
+
+- `F10`: exit
+- `Esc`: back/close
+- `Enter`: inspect/open/edit depending on context
+- `Alt+S`: incremental search
+- `F4`: refresh current scope
+- `F2`: primary action in current context
+- `F3`: secondary non-destructive action in current context
+- `Space`: mark/select where multiselect or monitoring exists
+- `Left` / `Right`: fold/unfold tree structures
+
+New tools should follow these unless there is a strong reason not to.
+
+### 5. Prefer additive evolution
+
+- keep each tool independently runnable
+- factor shared behavior into `tui`
+- avoid pushing unrelated workflows into one tool prematurely

@@ -238,6 +238,7 @@ private:
   bool handle_topic_list_key(int key);
   bool handle_search_key(int key);
   bool handle_topic_detail_key(int key);
+  bool launch_selected_visualizer();
   int page_step() const;
   void draw();
   void draw_topic_list(int top, int left, int bottom, int right);
