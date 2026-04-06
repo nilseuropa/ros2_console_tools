@@ -32,15 +32,25 @@ install(TARGETS occupancy_grid_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_library(parameter_commander_lib
+  src/parameter_commander_backend.cpp
+  src/parameter_commander_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(parameter_commander_lib
+  rclcpp
+)
+target_include_directories(parameter_commander_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(parameter_commander_lib ${NCURSESW_LIBRARY})
+
 add_executable(parameter_commander src/parameter_commander.cpp)
-target_sources(parameter_commander PRIVATE src/tui.cpp)
 ament_target_dependencies(parameter_commander
   rclcpp
 )
 target_include_directories(parameter_commander PRIVATE ${CURSES_INCLUDE_DIR} include)
-target_link_libraries(parameter_commander ${NCURSESW_LIBRARY})
+target_link_libraries(parameter_commander parameter_commander_lib)
 
-install(TARGETS parameter_commander
+install(TARGETS parameter_commander_lib parameter_commander
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -95,6 +105,10 @@ target_link_libraries(tf_monitor ${NCURSESW_LIBRARY})
 
 install(TARGETS tf_monitor
   DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY include/
+  DESTINATION include
 )
 
 ament_package()
