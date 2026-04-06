@@ -455,7 +455,8 @@ private:
     std::vector<LogEntry> snapshot;
     snapshot.reserve(logs_.size());
 
-    for (const auto & log : logs_) {
+    for (auto it = logs_.rbegin(); it != logs_.rend(); ++it) {
+      const auto & log = *it;
       if (log.source != live_source_name_) {
         continue;
       }
@@ -833,7 +834,7 @@ private:
   std::deque<LogEntry> logs_;
   std::map<std::string, bool> sources_;
   ViewMode view_mode_{ViewMode::Split};
-  PaneFocus focus_{PaneFocus::Logs};
+  PaneFocus focus_{PaneFocus::Sources};
   int selected_source_index_{0};
   int selected_log_index_{0};
   int selected_live_log_index_{0};
