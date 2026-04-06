@@ -93,17 +93,29 @@ install(TARGETS service_commander
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_library(tf_monitor_lib
+  src/tf_monitor_backend.cpp
+  src/tf_monitor_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(tf_monitor_lib
+  geometry_msgs
+  rclcpp
+  tf2_msgs
+)
+target_include_directories(tf_monitor_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(tf_monitor_lib ${NCURSESW_LIBRARY})
+
 add_executable(tf_monitor src/tf_monitor.cpp)
-target_sources(tf_monitor PRIVATE src/tui.cpp)
 ament_target_dependencies(tf_monitor
   geometry_msgs
   rclcpp
   tf2_msgs
 )
 target_include_directories(tf_monitor PRIVATE ${CURSES_INCLUDE_DIR} include)
-target_link_libraries(tf_monitor ${NCURSESW_LIBRARY})
+target_link_libraries(tf_monitor tf_monitor_lib)
 
-install(TARGETS tf_monitor
+install(TARGETS tf_monitor_lib tf_monitor
   DESTINATION lib/${PROJECT_NAME}
 )
 
