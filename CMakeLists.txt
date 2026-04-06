@@ -30,7 +30,7 @@ install(TARGETS occupancy_grid_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
-add_executable(parameter_commander src/parameter_console_node.cpp)
+add_executable(parameter_commander src/parameter_commander.cpp)
 target_sources(parameter_commander PRIVATE src/tui.cpp)
 ament_target_dependencies(parameter_commander
   rclcpp
