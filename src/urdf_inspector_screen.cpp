@@ -2,6 +2,8 @@
 
 #include <ncursesw/ncurses.h>
 
+#include <cctype>
+
 namespace ros2_console_tools {
 
 namespace {
@@ -18,6 +20,7 @@ using tui::Session;
 using tui::draw_box;
 using tui::draw_box_char;
 using tui::draw_help_bar;
+using tui::draw_help_bar_region;
 using tui::draw_search_box;
 using tui::draw_status_bar;
 using tui::draw_text_vline;
@@ -53,6 +56,9 @@ int UrdfInspectorScreen::run() {
 }
 
 bool UrdfInspectorScreen::handle_key(int key) {
+  if (popup_open_) {
+    return handle_popup_key(key);
+  }
   if (search_state_.active) {
     return handle_search_key(key);
   }
@@ -102,14 +108,55 @@ bool UrdfInspectorScreen::handle_key(int key) {
       return true;
     case '\n':
     case KEY_ENTER:
-      if (!backend_->rows_.empty() && backend_->rows_[static_cast<std::size_t>(backend_->selected_index_)].is_link) {
-        const auto & row = backend_->rows_[static_cast<std::size_t>(backend_->selected_index_)];
-        const bool collapsed = backend_->collapsed_links_[row.link_name];
-        if (collapsed) {
-          backend_->expand_selected();
+      if (const auto section = backend_->selected_xml_section()) {
+        popup_open_ = true;
+        popup_scroll_ = 0;
+        popup_lines_ = split_lines(*section);
+        if (!backend_->rows_.empty()) {
+          const auto & row = backend_->rows_[static_cast<std::size_t>(backend_->selected_index_)];
+          popup_title_ = row.is_link ? ("Link: " + row.link_name) : ("Joint: " + row.joint_name);
         } else {
-          backend_->collapse_selected();
+          popup_title_ = "URDF Section";
         }
+      } else {
+        backend_->status_line_ = "No XML section available for the selected item.";
+      }
+      return true;
+    default:
+      return true;
+  }
+}
+
+bool UrdfInspectorScreen::handle_popup_key(int key) {
+  switch (key) {
+    case KEY_F(10):
+      return false;
+    case 27:
+    case '\n':
+    case KEY_ENTER:
+      popup_open_ = false;
+      popup_scroll_ = 0;
+      popup_lines_.clear();
+      popup_title_.clear();
+      return true;
+    case KEY_UP:
+    case 'k':
+      if (popup_scroll_ > 0) {
+        --popup_scroll_;
+      }
+      return true;
+    case KEY_DOWN:
+    case 'j':
+      if (popup_scroll_ + 1 < static_cast<int>(popup_lines_.size())) {
+        ++popup_scroll_;
+      }
+      return true;
+    case KEY_PPAGE:
+      popup_scroll_ = std::max(0, popup_scroll_ - page_step());
+      return true;
+    case KEY_NPAGE:
+      if (!popup_lines_.empty()) {
+        popup_scroll_ = std::min(static_cast<int>(popup_lines_.size()) - 1, popup_scroll_ + page_step());
       }
       return true;
     default:
@@ -152,6 +199,139 @@ int UrdfInspectorScreen::page_step() const {
   return std::max(5, rows - 8);
 }
 
+std::vector<std::string> UrdfInspectorScreen::split_lines(const std::string & text) {
+  std::vector<std::string> lines;
+  std::stringstream stream(text);
+  std::string line;
+  while (std::getline(stream, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    std::string normalized;
+    normalized.reserve(line.size());
+    int column = 0;
+    for (char ch : line) {
+      if (ch == '\t') {
+        const int spaces = 2 - (column % 2);
+        normalized.append(static_cast<std::size_t>(spaces), ' ');
+        column += spaces;
+      } else {
+        normalized.push_back(ch);
+        ++column;
+      }
+    }
+    lines.push_back(std::move(normalized));
+  }
+  if (lines.empty()) {
+    lines.push_back(text);
+  }
+
+  std::size_t common_indent = std::string::npos;
+  for (std::size_t index = 1; index < lines.size(); ++index) {
+    const auto & current = lines[index];
+    const std::size_t first_non_space = current.find_first_not_of(' ');
+    if (first_non_space == std::string::npos) {
+      continue;
+    }
+    if (common_indent == std::string::npos) {
+      common_indent = first_non_space;
+    } else {
+      common_indent = std::min(common_indent, first_non_space);
+    }
+  }
+
+  if (common_indent != std::string::npos && common_indent > 0) {
+    for (std::size_t index = 1; index < lines.size(); ++index) {
+      auto & current = lines[index];
+      if (current.size() >= common_indent) {
+        current.erase(0, common_indent);
+      }
+    }
+  }
+
+  return lines;
+}
+
+std::vector<XmlSpan> UrdfInspectorScreen::highlight_xml_line(const std::string & line) const {
+  std::vector<XmlSpan> spans;
+  auto push_span = [&](const std::string & text, int color) {
+    if (text.empty()) {
+      return;
+    }
+    if (!spans.empty() && spans.back().color == color) {
+      spans.back().text += text;
+    } else {
+      spans.push_back({text, color});
+    }
+  };
+
+  std::size_t index = 0;
+  while (index < line.size()) {
+    if (line[index] == '<') {
+      std::size_t end = line.find('>', index);
+      if (end == std::string::npos) {
+        push_span(line.substr(index), kColorHeader);
+        break;
+      }
+      const std::string tag = line.substr(index, end - index + 1);
+      std::size_t inner = 0;
+      while (inner < tag.size()) {
+        if (tag[inner] == '<' || tag[inner] == '>' || tag[inner] == '/' || tag[inner] == '?') {
+          push_span(std::string(1, tag[inner]), kColorHeader);
+          ++inner;
+          continue;
+        }
+        if (std::isspace(static_cast<unsigned char>(tag[inner]))) {
+          push_span(std::string(1, tag[inner]), 0);
+          ++inner;
+          continue;
+        }
+        std::size_t token_end = inner;
+        while (token_end < tag.size() &&
+          !std::isspace(static_cast<unsigned char>(tag[token_end])) &&
+          tag[token_end] != '=' && tag[token_end] != '>' && tag[token_end] != '/')
+        {
+          ++token_end;
+        }
+        const std::string token = tag.substr(inner, token_end - inner);
+        if (token_end < tag.size() && tag[token_end] == '=') {
+          push_span(token, kColorTitle);
+        } else {
+          push_span(token, kColorHeader);
+        }
+        inner = token_end;
+        if (inner < tag.size() && tag[inner] == '=') {
+          push_span("=", kColorHeader);
+          ++inner;
+          if (inner < tag.size() && (tag[inner] == '"' || tag[inner] == '\'')) {
+            const char quote = tag[inner];
+            std::size_t value_end = inner + 1;
+            while (value_end < tag.size() && tag[value_end] != quote) {
+              ++value_end;
+            }
+            if (value_end < tag.size()) {
+              ++value_end;
+            }
+            push_span(tag.substr(inner, value_end - inner), tui::kColorPositive);
+            inner = value_end;
+          }
+        }
+      }
+      index = end + 1;
+      continue;
+    }
+
+    std::size_t next_tag = line.find('<', index);
+    push_span(line.substr(index, next_tag == std::string::npos ? std::string::npos : next_tag - index), 0);
+    if (next_tag == std::string::npos) {
+      break;
+    }
+    index = next_tag;
+  }
+
+  return spans;
+}
+
 void UrdfInspectorScreen::draw() {
   erase();
 
@@ -177,6 +357,9 @@ void UrdfInspectorScreen::draw() {
   draw_status_line(status_row, columns);
   draw_help_line(help_row, columns);
   draw_search_box(rows, columns, search_state_);
+  if (popup_open_) {
+    draw_xml_popup(rows, columns);
+  }
   refresh();
 }
 
@@ -210,10 +393,8 @@ void UrdfInspectorScreen::draw_tree_pane(int top, int left, int bottom, int righ
     }
 
     const auto & row = backend_->rows_[static_cast<std::size_t>(first_row + (row_y - top - 1))];
-    const std::string prefix =
-      std::string(static_cast<std::size_t>(row.depth * 2), ' ')
-      + (row.is_link ? "[] " : "() ");
-    const std::string text = prefix + row.label;
+    const std::string text =
+      std::string(static_cast<std::size_t>(row.depth * 2), ' ') + row.label;
     const int color = selected ? kColorSelection : (row.is_link ? kColorLink : 0);
     if (color != 0) {
       attron(COLOR_PAIR(color));
@@ -250,6 +431,59 @@ void UrdfInspectorScreen::draw_details_pane(int top, int left, int bottom, int r
   }
 }
 
+void UrdfInspectorScreen::draw_xml_popup(int rows, int columns) const {
+  const int popup_width = std::min(columns - 6, 100);
+  const int popup_height = std::min(rows - 6, 20);
+  const int left = std::max(2, (columns - popup_width) / 2);
+  const int top = std::max(2, (rows - popup_height) / 2);
+  const int right = left + popup_width - 1;
+  const int bottom = top + popup_height - 1;
+  const int inner_width = popup_width - 2;
+  const int visible_rows = std::max(1, popup_height - 3);
+
+  for (int row = top + 1; row < bottom; ++row) {
+    attron(COLOR_PAIR(tui::kColorPopup));
+    mvhline(row, left + 1, ' ', inner_width);
+    attroff(COLOR_PAIR(tui::kColorPopup));
+  }
+  draw_box(top, left, bottom, right, kColorFrame);
+
+  attron(COLOR_PAIR(kColorHeader) | A_BOLD);
+  mvprintw(top, left + 2, " %s ", truncate_text(popup_title_, popup_width - 6).c_str());
+  attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
+
+  const int max_scroll = std::max(0, static_cast<int>(popup_lines_.size()) - visible_rows);
+  const int scroll = std::clamp(popup_scroll_, 0, max_scroll);
+  for (int row = 0; row < visible_rows; ++row) {
+    const int screen_row = top + 1 + row;
+    const int line_index = scroll + row;
+    mvhline(screen_row, left + 1, ' ', inner_width);
+    if (line_index >= static_cast<int>(popup_lines_.size())) {
+      continue;
+    }
+
+    int column = left + 2;
+    int remaining = popup_width - 4;
+    for (const auto & span : highlight_xml_line(popup_lines_[static_cast<std::size_t>(line_index)])) {
+      if (remaining <= 0) {
+        break;
+      }
+      const std::string text = truncate_text(span.text, remaining);
+      if (span.color != 0) {
+        attron(COLOR_PAIR(span.color));
+      }
+      mvaddnstr(screen_row, column, text.c_str(), remaining);
+      if (span.color != 0) {
+        attroff(COLOR_PAIR(span.color));
+      }
+      column += static_cast<int>(text.size());
+      remaining -= static_cast<int>(text.size());
+    }
+  }
+
+  draw_help_bar_region(bottom - 1, left + 2, popup_width - 4, "Enter Close  Esc Close  Up Down Scroll  F10 Exit");
+}
+
 void UrdfInspectorScreen::draw_status_line(int row, int columns) const {
   std::string line = backend_->status_line_;
   if (!backend_->source_node_.empty()) {
@@ -259,7 +493,7 @@ void UrdfInspectorScreen::draw_status_line(int row, int columns) const {
 }
 
 void UrdfInspectorScreen::draw_help_line(int row, int columns) const {
-  draw_help_bar(row, columns, "Enter Toggle  Left Fold  Right Unfold  Alt+S Search  F4 Reload  F10 Exit");
+  draw_help_bar(row, columns, "Enter Inspect  Left Fold  Right Unfold  Alt+S Search  F4 Reload  F10 Exit");
 }
 
 }  // namespace ros2_console_tools

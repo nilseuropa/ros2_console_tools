@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -81,6 +82,11 @@ struct UrdfTreeRow {
   int depth{0};
 };
 
+struct XmlSpan {
+  std::string text;
+  int color{0};
+};
+
 class UrdfInspectorScreen;
 
 class UrdfInspectorBackend : public rclcpp::Node {
@@ -101,9 +107,12 @@ private:
   void clamp_selection();
   void expand_selected();
   void collapse_selected();
+  std::optional<std::string> selected_xml_section() const;
   std::vector<std::string> selected_details() const;
   std::vector<std::string> link_details(const urdf::LinkConstSharedPtr & link) const;
   std::vector<std::string> joint_details(const urdf::JointConstSharedPtr & joint) const;
+  std::optional<std::string> extract_tag_section(
+    const std::string & tag_name, const std::string & element_name) const;
   urdf::LinkConstSharedPtr selected_link() const;
   urdf::JointConstSharedPtr selected_joint() const;
   int selected_parent_link_index() const;
@@ -111,6 +120,7 @@ private:
   std::string target_node_;
   std::string parameter_name_{"robot_description"};
   std::string source_node_;
+  std::string model_xml_;
   std::shared_ptr<urdf::Model> model_;
   std::vector<UrdfTreeRow> rows_;
   std::map<std::string, bool> collapsed_links_;
@@ -128,15 +138,23 @@ public:
 private:
   bool handle_key(int key);
   bool handle_search_key(int key);
+  bool handle_popup_key(int key);
+  static std::vector<std::string> split_lines(const std::string & text);
+  std::vector<XmlSpan> highlight_xml_line(const std::string & line) const;
   int page_step() const;
   void draw();
   void draw_tree_pane(int top, int left, int bottom, int right);
   void draw_details_pane(int top, int left, int bottom, int right) const;
+  void draw_xml_popup(int rows, int columns) const;
   void draw_status_line(int row, int columns) const;
   void draw_help_line(int row, int columns) const;
 
   std::shared_ptr<UrdfInspectorBackend> backend_;
   tui::SearchState search_state_;
+  bool popup_open_{false};
+  int popup_scroll_{0};
+  std::string popup_title_;
+  std::vector<std::string> popup_lines_;
 };
 
 }  // namespace ros2_console_tools

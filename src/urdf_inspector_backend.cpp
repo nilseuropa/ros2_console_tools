@@ -35,6 +35,7 @@ void UrdfInspectorBackend::refresh_model() {
   }
 
   model_ = std::move(model);
+  model_xml_ = xml;
   source_node_ = source_node;
   rebuild_rows();
   status_line_ =
@@ -73,6 +74,20 @@ bool UrdfInspectorBackend::load_from_target_node(std::string & xml_out, std::str
   }
   source_node_out = target_node_;
   return true;
+}
+
+std::optional<std::string> UrdfInspectorBackend::selected_xml_section() const {
+  if (rows_.empty()) {
+    return std::nullopt;
+  }
+  const auto & row = rows_[static_cast<std::size_t>(selected_index_)];
+  if (row.is_link) {
+    return extract_tag_section("link", row.link_name);
+  }
+  if (!row.joint_name.empty()) {
+    return extract_tag_section("joint", row.joint_name);
+  }
+  return std::nullopt;
 }
 
 bool UrdfInspectorBackend::discover_and_load(std::string & xml_out, std::string & source_node_out) {
@@ -285,6 +300,73 @@ std::vector<std::string> UrdfInspectorBackend::joint_details(const urdf::JointCo
   }
 
   return lines;
+}
+
+std::optional<std::string> UrdfInspectorBackend::extract_tag_section(
+  const std::string & tag_name, const std::string & element_name) const
+{
+  if (model_xml_.empty()) {
+    return std::nullopt;
+  }
+
+  const std::string open_pattern = "<" + tag_name;
+  std::size_t search_pos = 0;
+  while (true) {
+    const std::size_t tag_start = model_xml_.find(open_pattern, search_pos);
+    if (tag_start == std::string::npos) {
+      return std::nullopt;
+    }
+
+    const std::size_t tag_end = model_xml_.find('>', tag_start);
+    if (tag_end == std::string::npos) {
+      return std::nullopt;
+    }
+
+    const std::string open_tag = model_xml_.substr(tag_start, tag_end - tag_start + 1);
+    const std::string name_attr = "name=\"" + element_name + "\"";
+    const std::string alt_name_attr = "name='" + element_name + "'";
+    if (open_tag.find(name_attr) == std::string::npos && open_tag.find(alt_name_attr) == std::string::npos) {
+      search_pos = tag_end + 1;
+      continue;
+    }
+
+    if (tag_end > tag_start && model_xml_[tag_end - 1] == '/') {
+      return model_xml_.substr(tag_start, tag_end - tag_start + 1);
+    }
+
+    int depth = 1;
+    std::size_t cursor = tag_end + 1;
+    while (depth > 0 && cursor < model_xml_.size()) {
+      const std::size_t next_open = model_xml_.find(open_pattern, cursor);
+      const std::size_t next_close = model_xml_.find("</" + tag_name, cursor);
+      if (next_close == std::string::npos) {
+        return std::nullopt;
+      }
+
+      if (next_open != std::string::npos && next_open < next_close) {
+        const std::size_t nested_end = model_xml_.find('>', next_open);
+        if (nested_end == std::string::npos) {
+          return std::nullopt;
+        }
+        if (!(nested_end > next_open && model_xml_[nested_end - 1] == '/')) {
+          ++depth;
+        }
+        cursor = nested_end + 1;
+        continue;
+      }
+
+      const std::size_t close_end = model_xml_.find('>', next_close);
+      if (close_end == std::string::npos) {
+        return std::nullopt;
+      }
+      --depth;
+      cursor = close_end + 1;
+      if (depth == 0) {
+        return model_xml_.substr(tag_start, close_end - tag_start + 1);
+      }
+    }
+    return std::nullopt;
+  }
 }
 
 urdf::LinkConstSharedPtr UrdfInspectorBackend::selected_link() const {
