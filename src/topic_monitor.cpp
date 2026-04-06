@@ -209,6 +209,14 @@ struct TopicRow {
   std::string bandwidth;
 };
 
+struct TopicListItem {
+  bool is_namespace{false};
+  std::string label;
+  std::string namespace_path;
+  int depth{0};
+  TopicRow row;
+};
+
 class TopicMonitorNode : public rclcpp::Node {
 public:
   TopicMonitorNode()
@@ -248,8 +256,8 @@ private:
   }
 
   bool handle_topic_list_key(int key) {
-    const auto rows = topic_rows_snapshot();
-    clamp_topic_selection(rows);
+    const auto items = visible_topic_items();
+    clamp_topic_selection(items);
 
     switch (key) {
       case KEY_F(10):
@@ -273,7 +281,7 @@ private:
         return true;
       case KEY_DOWN:
       case 'j':
-        if (selected_index_ + 1 < static_cast<int>(rows.size())) {
+        if (selected_index_ + 1 < static_cast<int>(items.size())) {
           ++selected_index_;
         }
         return true;
@@ -281,9 +289,17 @@ private:
         selected_index_ = std::max(0, selected_index_ - page_step());
         return true;
       case KEY_NPAGE:
-        if (!rows.empty()) {
-          selected_index_ = std::min(static_cast<int>(rows.size()) - 1, selected_index_ + page_step());
+        if (!items.empty()) {
+          selected_index_ = std::min(static_cast<int>(items.size()) - 1, selected_index_ + page_step());
         }
+        return true;
+      case KEY_RIGHT:
+      case 'l':
+        expand_selected_namespace();
+        return true;
+      case KEY_LEFT:
+      case 'h':
+        collapse_selected_namespace();
         return true;
       case ' ':
       case KEY_IC:
@@ -481,14 +497,20 @@ private:
   }
 
   void toggle_selected_topic_monitoring() {
-    const auto rows = topic_rows_snapshot();
-    clamp_topic_selection(rows);
-    if (rows.empty() || selected_index_ < 0 || selected_index_ >= static_cast<int>(rows.size())) {
+    const auto items = visible_topic_items();
+    clamp_topic_selection(items);
+    if (items.empty() || selected_index_ < 0 || selected_index_ >= static_cast<int>(items.size())) {
       status_line_ = "No topic selected.";
       return;
     }
 
-    const std::string topic_name = rows[static_cast<std::size_t>(selected_index_)].name;
+    const auto & item = items[static_cast<std::size_t>(selected_index_)];
+    if (item.is_namespace) {
+      status_line_ = "Select a topic, not a folder.";
+      return;
+    }
+
+    const std::string topic_name = item.row.name;
     TopicEntry snapshot;
     {
       std::lock_guard<std::mutex> lock(mutex_);
@@ -509,14 +531,20 @@ private:
   }
 
   void open_selected_topic_detail() {
-    const auto rows = topic_rows_snapshot();
-    clamp_topic_selection(rows);
-    if (rows.empty() || selected_index_ < 0 || selected_index_ >= static_cast<int>(rows.size())) {
+    const auto items = visible_topic_items();
+    clamp_topic_selection(items);
+    if (items.empty() || selected_index_ < 0 || selected_index_ >= static_cast<int>(items.size())) {
       status_line_ = "No topic selected.";
       return;
     }
 
-    detail_topic_name_ = rows[static_cast<std::size_t>(selected_index_)].name;
+    const auto & item = items[static_cast<std::size_t>(selected_index_)];
+    if (item.is_namespace) {
+      status_line_ = "Select a topic, not a folder.";
+      return;
+    }
+
+    detail_topic_name_ = item.row.name;
     detail_scroll_ = 0;
     selected_detail_index_ = 0;
     view_mode_ = ViewMode::TopicDetail;
@@ -927,8 +955,8 @@ private:
   }
 
   void draw_topic_list(int top, int left, int bottom, int right) {
-    const auto rows = topic_rows_snapshot();
-    clamp_topic_selection(rows);
+    const auto items = visible_topic_items();
+    clamp_topic_selection(items);
 
     const int visible_rows = std::max(1, bottom - top + 1);
     const int width = right - left + 1;
@@ -958,7 +986,7 @@ private:
     attroff(COLOR_PAIR(kColorHeader));
 
     const int first_row = list_scroll_;
-    const int last_row = std::min(static_cast<int>(rows.size()), first_row + visible_rows - 1);
+    const int last_row = std::min(static_cast<int>(items.size()), first_row + visible_rows - 1);
     for (int row = top + 1; row <= bottom; ++row) {
       const bool has_item = first_row + (row - top - 1) < last_row;
       const bool selected = has_item && (first_row + (row - top - 1) == selected_index_);
@@ -977,24 +1005,45 @@ private:
         continue;
       }
 
-      const auto & entry = rows[static_cast<std::size_t>(first_row + (row - top - 1))];
+      const auto & entry = items[static_cast<std::size_t>(first_row + (row - top - 1))];
+      const std::string topic_text = std::string(static_cast<std::size_t>(entry.depth * 2), ' ') + entry.label;
+      if (entry.is_namespace) {
+        const int text_color = selected ? kColorSelection : kColorFrame;
+        if (text_color != 0) {
+          attron(COLOR_PAIR(text_color));
+        }
+        mvprintw(row, left, "%-*s", topic_width, truncate_text(topic_text, topic_width).c_str());
+        if (text_color != 0) {
+          attroff(COLOR_PAIR(text_color));
+        }
+        if (selected) {
+          mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+          mvaddch(row, sep_one_x, '|');
+          mvaddch(row, sep_two_x, '|');
+          mvaddch(row, sep_three_x, '|');
+          mvchgat(row, left, topic_width, A_NORMAL, kColorSelection, nullptr);
+        }
+        continue;
+      }
+
+      const auto & row_data = entry.row;
       const int text_color =
-        entry.stale
+        row_data.stale
         ? (selected ? kColorStaleSelection : kColorStale)
-        : entry.monitored
+        : row_data.monitored
         ? (selected ? kColorMonitoredSelection : kColorMonitored)
         : (selected ? kColorSelection : 0);
       if (text_color != 0) {
         attron(COLOR_PAIR(text_color));
       }
-      mvprintw(row, left, "%-*s", topic_width, truncate_text(entry.name, topic_width).c_str());
-      mvprintw(row, sep_one_x + 1, "%-*s", avg_width, truncate_text(entry.avg_hz, avg_width).c_str());
+      mvprintw(row, left, "%-*s", topic_width, truncate_text(topic_text, topic_width).c_str());
+      mvprintw(row, sep_one_x + 1, "%-*s", avg_width, truncate_text(row_data.avg_hz, avg_width).c_str());
       mvprintw(
         row, sep_two_x + 1, "%-*s", minmax_width,
-        truncate_text(entry.min_max_hz, minmax_width).c_str());
+        truncate_text(row_data.min_max_hz, minmax_width).c_str());
       mvprintw(
         row, sep_three_x + 1, "%-*s", bandwidth_width,
-        truncate_text(entry.bandwidth, bandwidth_width).c_str());
+        truncate_text(row_data.bandwidth, bandwidth_width).c_str());
       if (text_color != 0) {
         attroff(COLOR_PAIR(text_color));
       }
@@ -1089,12 +1138,16 @@ private:
           columns - 1);
       }
     } else {
-      const auto rows = topic_rows_snapshot();
-      if (!rows.empty() && selected_index_ >= 0 && selected_index_ < static_cast<int>(rows.size())) {
-        const auto & selected = rows[static_cast<std::size_t>(selected_index_)];
-        line = truncate_text(
-          selected.name + " [" + selected.type + "]  " + status_line_,
-          columns - 1);
+      const auto items = visible_topic_items();
+      if (!items.empty() && selected_index_ >= 0 && selected_index_ < static_cast<int>(items.size())) {
+        const auto & selected = items[static_cast<std::size_t>(selected_index_)];
+        if (selected.is_namespace) {
+          line = truncate_text(selected.namespace_path + "  " + status_line_, columns - 1);
+        } else {
+          line = truncate_text(
+            selected.row.name + " [" + selected.row.type + "]  " + status_line_,
+            columns - 1);
+        }
       }
     }
 
@@ -1113,13 +1166,119 @@ private:
     attroff(COLOR_PAIR(kColorHelp));
   }
 
-  void clamp_topic_selection(const std::vector<TopicRow> & rows) {
-    if (rows.empty()) {
+  void clamp_topic_selection(const std::vector<TopicListItem> & items) {
+    if (items.empty()) {
       selected_index_ = 0;
       list_scroll_ = 0;
       return;
     }
-    selected_index_ = std::clamp(selected_index_, 0, static_cast<int>(rows.size()) - 1);
+    selected_index_ = std::clamp(selected_index_, 0, static_cast<int>(items.size()) - 1);
+  }
+
+  std::string topic_namespace(const std::string & topic_name) const {
+    const auto slash = topic_name.find_last_of('/');
+    if (slash == std::string::npos || slash == 0) {
+      return "";
+    }
+    return topic_name.substr(1, slash - 1);
+  }
+
+  std::string topic_leaf_name(const std::string & topic_name) const {
+    const auto slash = topic_name.find_last_of('/');
+    if (slash == std::string::npos) {
+      return topic_name;
+    }
+    return topic_name.substr(slash + 1);
+  }
+
+  bool is_topic_namespace_expanded(const std::string & namespace_path) const {
+    const auto found = collapsed_topic_namespaces_.find(namespace_path);
+    if (found == collapsed_topic_namespaces_.end()) {
+      return false;
+    }
+    return !found->second;
+  }
+
+  std::vector<TopicListItem> visible_topic_items() const {
+    const auto rows = topic_rows_snapshot();
+    std::vector<TopicListItem> items;
+    std::map<std::string, bool> emitted_namespaces;
+
+    for (const auto & row : rows) {
+      const std::string ns = topic_namespace(row.name);
+      bool hidden = false;
+      if (!ns.empty()) {
+        std::size_t start = 0;
+        int depth = 0;
+        while (start < ns.size()) {
+          const auto slash = ns.find('/', start);
+          const std::string part =
+            slash == std::string::npos ? ns.substr(start) : ns.substr(start, slash - start);
+          const std::string path = ns.substr(0, slash == std::string::npos ? ns.size() : slash);
+          if (!emitted_namespaces[path]) {
+            items.push_back({true, part, path, depth, {}});
+            emitted_namespaces[path] = true;
+          }
+          if (!is_topic_namespace_expanded(path)) {
+            hidden = true;
+            break;
+          }
+          if (slash == std::string::npos) {
+            break;
+          }
+          start = slash + 1;
+          ++depth;
+        }
+      }
+
+      if (!hidden) {
+        TopicListItem item;
+        item.is_namespace = false;
+        item.label = topic_leaf_name(row.name);
+        item.namespace_path = ns;
+        item.depth = ns.empty() ? 0 : static_cast<int>(std::count(ns.begin(), ns.end(), '/')) + 1;
+        item.row = row;
+        items.push_back(std::move(item));
+      }
+    }
+
+    return items;
+  }
+
+  void expand_selected_namespace() {
+    const auto items = visible_topic_items();
+    if (items.empty() || selected_index_ < 0 || selected_index_ >= static_cast<int>(items.size())) {
+      return;
+    }
+    const auto & item = items[static_cast<std::size_t>(selected_index_)];
+    if (!item.is_namespace) {
+      return;
+    }
+    collapsed_topic_namespaces_[item.namespace_path] = false;
+  }
+
+  void collapse_selected_namespace() {
+    const auto items = visible_topic_items();
+    if (items.empty() || selected_index_ < 0 || selected_index_ >= static_cast<int>(items.size())) {
+      return;
+    }
+    const auto & item = items[static_cast<std::size_t>(selected_index_)];
+    if (item.is_namespace) {
+      collapsed_topic_namespaces_[item.namespace_path] = true;
+      return;
+    }
+
+    if (item.namespace_path.empty()) {
+      return;
+    }
+
+    for (std::size_t index = 0; index < items.size(); ++index) {
+      if (items[index].is_namespace && items[index].namespace_path == item.namespace_path) {
+        selected_index_ = static_cast<int>(index);
+        collapsed_topic_namespaces_[item.namespace_path] = true;
+        return;
+      }
+    }
   }
 
   void clamp_detail_selection(const std::vector<DetailRow> & rows) {
@@ -1134,6 +1293,7 @@ private:
   mutable std::mutex mutex_;
   std::map<std::string, TopicEntry> topics_;
   std::map<std::string, TopicIntrospection> introspection_cache_;
+  std::map<std::string, bool> collapsed_topic_namespaces_;
   std::vector<std::pair<std::string, rclcpp::GenericSubscription::SharedPtr>> monitored_subscriptions_;
   ViewMode view_mode_{ViewMode::TopicList};
   int selected_index_{0};
