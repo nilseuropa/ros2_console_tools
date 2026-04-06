@@ -14,10 +14,10 @@
 
 namespace ros2_console_tools {
 
-int run_log_viewer_tool() {
+int run_log_viewer_tool(bool embedded_mode) {
   auto backend = std::make_shared<LogViewerBackend>();
   backend->initialize_subscription();
-  LogViewerScreen screen(backend);
+  LogViewerScreen screen(backend, embedded_mode);
 
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(backend);
@@ -66,8 +66,9 @@ using tui::theme_attr;
 
 }  // namespace
 
-LogViewerScreen::LogViewerScreen(std::shared_ptr<LogViewerBackend> backend)
-: backend_(std::move(backend)) {}
+LogViewerScreen::LogViewerScreen(std::shared_ptr<LogViewerBackend> backend, bool embedded_mode)
+: backend_(std::move(backend)),
+  embedded_mode_(embedded_mode) {}
 
 int LogViewerScreen::run() {
   Session ncurses_session;
@@ -112,6 +113,9 @@ bool LogViewerScreen::handle_key(int key) {
       if (backend_->view_mode_ == LogViewerViewMode::SourceLive) {
         backend_->close_live_source();
         return true;
+      }
+      if (embedded_mode_) {
+        return false;
       }
       break;
     case '\t':

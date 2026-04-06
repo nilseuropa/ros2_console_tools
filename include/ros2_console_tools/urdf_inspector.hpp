@@ -20,7 +20,7 @@
 
 namespace ros2_console_tools {
 
-int run_urdf_inspector_tool(const std::string & target_node = "");
+int run_urdf_inspector_tool(const std::string & target_node = "", bool embedded_mode = false);
 
 inline std::string format_double(double value, int precision = 3) {
   std::ostringstream stream;
@@ -134,7 +134,7 @@ private:
 
 class UrdfInspectorScreen {
 public:
-  explicit UrdfInspectorScreen(std::shared_ptr<UrdfInspectorBackend> backend);
+  explicit UrdfInspectorScreen(std::shared_ptr<UrdfInspectorBackend> backend, bool embedded_mode = false);
   int run();
 
 private:
@@ -153,6 +153,7 @@ private:
   void draw_help_line(int row, int columns) const;
 
   std::shared_ptr<UrdfInspectorBackend> backend_;
+  bool embedded_mode_{false};
   tui::SearchState search_state_;
   bool popup_open_{false};
   int popup_scroll_{0};

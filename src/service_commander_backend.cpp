@@ -11,7 +11,7 @@ namespace ros2_console_tools {
 ServiceCommanderBackend::ServiceCommanderBackend(const std::string & initial_service)
 : Node("service_commander"),
   initial_service_name_(initial_service),
-  auto_open_initial_service_(!initial_service.empty())
+  auto_open_initial_service_(false)
 {
   const std::string theme_config_path =
     this->declare_parameter<std::string>("theme_config_path", tui::default_theme_config_path());
@@ -60,10 +60,6 @@ void ServiceCommanderBackend::select_initial_service_if_present() {
     if (services_[index].name == initial_service_name_) {
       selected_service_index_ = static_cast<int>(index);
       initial_service_name_.clear();
-      if (auto_open_initial_service_) {
-        auto_open_initial_service_ = false;
-        open_selected_service();
-      }
       return;
     }
   }

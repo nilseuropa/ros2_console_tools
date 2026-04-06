@@ -5,10 +5,10 @@
 
 namespace ros2_console_tools {
 
-int run_tf_monitor_tool() {
+int run_tf_monitor_tool(bool embedded_mode) {
   auto backend = std::make_shared<TfMonitorBackend>();
   backend->initialize_subscriptions();
-  TfMonitorScreen screen(backend);
+  TfMonitorScreen screen(backend, embedded_mode);
 
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(backend);
@@ -53,8 +53,9 @@ using tui::truncate_text;
 
 }  // namespace
 
-TfMonitorScreen::TfMonitorScreen(std::shared_ptr<TfMonitorBackend> backend)
-: backend_(std::move(backend)) {}
+TfMonitorScreen::TfMonitorScreen(std::shared_ptr<TfMonitorBackend> backend, bool embedded_mode)
+: backend_(std::move(backend)),
+  embedded_mode_(embedded_mode) {}
 
 int TfMonitorScreen::run() {
   Session ncurses_session;
@@ -93,6 +94,9 @@ bool TfMonitorScreen::handle_key(int key) {
         start_search(search_state_);
         backend_->set_status("Search.");
         return true;
+      }
+      if (embedded_mode_) {
+        return false;
       }
       return true;
     case ' ':

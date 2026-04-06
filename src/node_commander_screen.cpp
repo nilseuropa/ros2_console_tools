@@ -236,7 +236,7 @@ int NodeCommanderScreen::page_step() const {
 bool NodeCommanderScreen::launch_log_viewer() {
   def_prog_mode();
   endwin();
-  (void)run_log_viewer_tool();
+  (void)run_log_viewer_tool(true);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
@@ -284,7 +284,7 @@ bool NodeCommanderScreen::launch_topic_monitor() {
 bool NodeCommanderScreen::launch_tf_monitor() {
   def_prog_mode();
   endwin();
-  (void)run_tf_monitor_tool();
+  (void)run_tf_monitor_tool(true);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
@@ -296,7 +296,7 @@ bool NodeCommanderScreen::launch_tf_monitor() {
 bool NodeCommanderScreen::launch_urdf_inspector() {
   def_prog_mode();
   endwin();
-  (void)run_urdf_inspector_tool("");
+  (void)run_urdf_inspector_tool("", true);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);

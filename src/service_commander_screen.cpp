@@ -179,9 +179,6 @@ bool ServiceCommanderScreen::handle_service_detail_key(int key) {
     case KEY_F(10):
       return false;
     case 27:
-      if (embedded_mode_) {
-        return false;
-      }
       backend_->close_service_detail();
       return true;
     case KEY_F(4):

@@ -7,9 +7,9 @@
 
 namespace ros2_console_tools {
 
-int run_urdf_inspector_tool(const std::string & target_node) {
+int run_urdf_inspector_tool(const std::string & target_node, bool embedded_mode) {
   auto backend = std::make_shared<UrdfInspectorBackend>(target_node);
-  UrdfInspectorScreen screen(backend);
+  UrdfInspectorScreen screen(backend, embedded_mode);
 
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(backend);
@@ -53,8 +53,10 @@ using tui::truncate_text;
 
 }  // namespace
 
-UrdfInspectorScreen::UrdfInspectorScreen(std::shared_ptr<UrdfInspectorBackend> backend)
-: backend_(std::move(backend)) {}
+UrdfInspectorScreen::UrdfInspectorScreen(
+  std::shared_ptr<UrdfInspectorBackend> backend, bool embedded_mode)
+: backend_(std::move(backend)),
+  embedded_mode_(embedded_mode) {}
 
 int UrdfInspectorScreen::run() {
   Session ncurses_session;
@@ -94,6 +96,9 @@ bool UrdfInspectorScreen::handle_key(int key) {
         start_search(search_state_);
         backend_->status_line_ = "Search.";
         return true;
+      }
+      if (embedded_mode_) {
+        return false;
       }
       return true;
     case KEY_UP:

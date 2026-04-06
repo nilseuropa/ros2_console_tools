@@ -169,9 +169,6 @@ bool ActionCommanderScreen::handle_detail_key(int key) {
       backend_->refresh_actions();
       return true;
     case 27:
-      if (embedded_mode_) {
-        return false;
-      }
       backend_->close_action_detail();
       return true;
     default:

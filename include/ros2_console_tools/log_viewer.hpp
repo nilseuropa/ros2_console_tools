@@ -22,7 +22,7 @@
 
 namespace ros2_console_tools {
 
-int run_log_viewer_tool();
+int run_log_viewer_tool(bool embedded_mode = false);
 
 using LogViewerClock = std::chrono::steady_clock;
 using LogMessage = rcl_interfaces::msg::Log;
@@ -157,7 +157,7 @@ private:
 
 class LogViewerScreen {
 public:
-  explicit LogViewerScreen(std::shared_ptr<LogViewerBackend> backend);
+  explicit LogViewerScreen(std::shared_ptr<LogViewerBackend> backend, bool embedded_mode = false);
   int run();
 
 private:
@@ -185,6 +185,7 @@ private:
   void draw_detail_popup(int rows, int columns) const;
 
   std::shared_ptr<LogViewerBackend> backend_;
+  bool embedded_mode_{false};
   tui::SearchState search_state_;
 };
 

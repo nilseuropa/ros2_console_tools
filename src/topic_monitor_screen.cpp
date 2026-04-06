@@ -202,9 +202,6 @@ bool TopicMonitorScreen::handle_topic_detail_key(int key) {
     case KEY_F(2):
       return launch_selected_visualizer();
     case 27:
-      if (embedded_mode_) {
-        return false;
-      }
       backend_->close_topic_detail();
       return true;
     case KEY_F(4):

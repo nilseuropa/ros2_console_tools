@@ -121,6 +121,10 @@ bool ParameterCommanderScreen::handle_key(int key) {
       }
       if (backend_->current_view_ == ParameterCommanderViewMode::ParameterList) {
         close_popup();
+        if (embedded_mode_) {
+          curs_set(1);
+          return false;
+        }
         backend_->switch_to_node_list();
         return true;
       }

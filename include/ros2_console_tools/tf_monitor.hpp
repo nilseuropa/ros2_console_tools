@@ -23,7 +23,7 @@
 
 namespace ros2_console_tools {
 
-int run_tf_monitor_tool();
+int run_tf_monitor_tool(bool embedded_mode = false);
 
 using TfClock = std::chrono::steady_clock;
 using TFMessage = tf2_msgs::msg::TFMessage;
@@ -210,7 +210,7 @@ private:
 
 class TfMonitorScreen {
 public:
-  explicit TfMonitorScreen(std::shared_ptr<TfMonitorBackend> backend);
+  explicit TfMonitorScreen(std::shared_ptr<TfMonitorBackend> backend, bool embedded_mode = false);
   int run();
 
 private:
@@ -225,6 +225,7 @@ private:
   void draw_inspect_popup(int rows, int columns) const;
 
   std::shared_ptr<TfMonitorBackend> backend_;
+  bool embedded_mode_{false};
   tui::SearchState search_state_;
 };
 
