@@ -37,4 +37,15 @@ install(TARGETS parameter_commander
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_executable(topic_monitor src/topic_monitor.cpp)
+ament_target_dependencies(topic_monitor
+  rclcpp
+)
+target_include_directories(topic_monitor PRIVATE ${CURSES_INCLUDE_DIR})
+target_link_libraries(topic_monitor ${CURSES_LIBRARIES})
+
+install(TARGETS topic_monitor
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
