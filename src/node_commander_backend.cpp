@@ -97,7 +97,7 @@ std::vector<DetailLine> NodeCommanderBackend::selected_node_details() const {
   const NodeDetails details = build_node_details(selected_node);
   std::vector<DetailLine> lines;
   lines.push_back({"Node", true, NodeDetailAction::None, ""});
-  lines.push_back({details.node_name, false, NodeDetailAction::OpenParameters, details.node_name});
+  lines.push_back({details.node_name, false, NodeDetailAction::None, ""});
   lines.push_back({"Parameter Services", true, NodeDetailAction::None, ""});
   lines.push_back({
     details.parameter_services_ready ? "available" : "unavailable",

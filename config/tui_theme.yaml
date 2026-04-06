@@ -16,7 +16,7 @@ tui_theme:
     background: yellow
     attributes: []
   status:
-    foreground: green
+    foreground: white
     background: default
     attributes: []
   help:

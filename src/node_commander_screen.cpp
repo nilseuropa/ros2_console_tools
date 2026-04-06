@@ -1,5 +1,9 @@
 #include "ros2_console_tools/node_commander.hpp"
 
+#include "ros2_console_tools/log_viewer.hpp"
+#include "ros2_console_tools/tf_monitor.hpp"
+#include "ros2_console_tools/urdf_inspector.hpp"
+
 #include <ncursesw/ncurses.h>
 
 #include <algorithm>
@@ -7,9 +11,9 @@
 
 namespace ros2_console_tools {
 
-int run_parameter_commander_tool(const std::string & target_node);
-int run_topic_monitor_tool(const std::string & initial_topic);
-int run_service_commander_tool(const std::string & initial_service);
+int run_parameter_commander_tool(const std::string & target_node, bool embedded_mode);
+int run_topic_monitor_tool(const std::string & initial_topic, bool embedded_mode);
+int run_service_commander_tool(const std::string & initial_service, bool embedded_mode);
 
 namespace {
 
@@ -69,6 +73,21 @@ int NodeCommanderScreen::run() {
 }
 
 bool NodeCommanderScreen::handle_key(int key) {
+  if (help_popup_open_) {
+    switch (key) {
+      case KEY_F(10):
+        return false;
+      case 27:
+      case '\n':
+      case KEY_ENTER:
+      case KEY_F(1):
+        help_popup_open_ = false;
+        return true;
+      default:
+        return true;
+    }
+  }
+
   if (search_state_.active) {
     return handle_search_key(key);
   }
@@ -76,9 +95,19 @@ bool NodeCommanderScreen::handle_key(int key) {
   switch (key) {
     case KEY_F(10):
       return false;
-    case KEY_F(4):
-      backend_->refresh_nodes();
+    case KEY_F(1):
+      help_popup_open_ = true;
       return true;
+    case KEY_F(2):
+      return launch_log_viewer();
+    case KEY_F(3):
+      return launch_service_commander();
+    case KEY_F(4):
+      return launch_topic_monitor();
+    case KEY_F(5):
+      return launch_tf_monitor();
+    case KEY_F(6):
+      return launch_urdf_inspector();
     case '\t':
       focus_pane_ = focus_pane_ == NodeCommanderFocusPane::NodeList
         ? NodeCommanderFocusPane::DetailPane
@@ -183,6 +212,66 @@ int NodeCommanderScreen::page_step() const {
   return std::max(5, rows - 8);
 }
 
+bool NodeCommanderScreen::launch_log_viewer() {
+  def_prog_mode();
+  endwin();
+  (void)run_log_viewer_tool();
+  resume_parent_screen();
+  {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Returned from log_viewer.";
+  }
+  return true;
+}
+
+bool NodeCommanderScreen::launch_service_commander() {
+  def_prog_mode();
+  endwin();
+  (void)run_service_commander_tool("", true);
+  resume_parent_screen();
+  {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Returned from service_commander.";
+  }
+  return true;
+}
+
+bool NodeCommanderScreen::launch_topic_monitor() {
+  def_prog_mode();
+  endwin();
+  (void)run_topic_monitor_tool("", true);
+  resume_parent_screen();
+  {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Returned from topic_monitor.";
+  }
+  return true;
+}
+
+bool NodeCommanderScreen::launch_tf_monitor() {
+  def_prog_mode();
+  endwin();
+  (void)run_tf_monitor_tool();
+  resume_parent_screen();
+  {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Returned from tf_monitor.";
+  }
+  return true;
+}
+
+bool NodeCommanderScreen::launch_urdf_inspector() {
+  def_prog_mode();
+  endwin();
+  (void)run_urdf_inspector_tool("");
+  resume_parent_screen();
+  {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Returned from urdf_inspector.";
+  }
+  return true;
+}
+
 bool NodeCommanderScreen::launch_selected_node_parameters() {
   std::string selected_node;
   {
@@ -199,7 +288,7 @@ bool NodeCommanderScreen::launch_selected_node_parameters() {
 
   def_prog_mode();
   endwin();
-  (void)run_parameter_commander_tool(selected_node);
+  (void)run_parameter_commander_tool(selected_node, true);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
@@ -220,13 +309,13 @@ bool NodeCommanderScreen::launch_selected_detail_action() {
   endwin();
   switch (line->action) {
     case NodeDetailAction::OpenParameters:
-      (void)run_parameter_commander_tool(line->target);
+      (void)run_parameter_commander_tool(line->target, true);
       break;
     case NodeDetailAction::OpenTopicMonitor:
-      (void)run_topic_monitor_tool(line->target);
+      (void)run_topic_monitor_tool(line->target, true);
       break;
     case NodeDetailAction::OpenServiceCommander:
-      (void)run_service_commander_tool(line->target);
+      (void)run_service_commander_tool(line->target, true);
       break;
     case NodeDetailAction::None:
       break;
@@ -274,6 +363,29 @@ void NodeCommanderScreen::draw() {
   draw_status_line(status_row, columns);
   draw_help_line(help_row, columns);
   draw_search_box(rows, columns, search_state_);
+  if (help_popup_open_) {
+    const int popup_width = std::min(columns - 8, 76);
+    const int popup_height = 11;
+    const int popup_left = std::max(2, (columns - popup_width) / 2);
+    const int popup_top = std::max(1, (rows - popup_height) / 2);
+    const int popup_right = popup_left + popup_width - 1;
+    const int popup_bottom = popup_top + popup_height - 1;
+
+    draw_box(popup_top, popup_left, popup_bottom, popup_right, kColorFrame);
+    attron(COLOR_PAIR(kColorHeader));
+    mvprintw(popup_top, popup_left + 2, "Node Commander Help ");
+    attroff(COLOR_PAIR(kColorHeader));
+
+    const int text_left = popup_left + 2;
+    const int text_width = popup_width - 4;
+    mvprintw(popup_top + 2, text_left, "%-*s", text_width, "Enter: open selected node or selected detail item");
+    mvprintw(popup_top + 3, text_left, "%-*s", text_width, "Tab: switch between node list and detail pane");
+    mvprintw(popup_top + 4, text_left, "%-*s", text_width, "Alt+S: search nodes");
+    mvprintw(popup_top + 5, text_left, "%-*s", text_width, "F2: log_viewer    F3: service_commander");
+    mvprintw(popup_top + 6, text_left, "%-*s", text_width, "F4: topic_monitor F5: tf_monitor");
+    mvprintw(popup_top + 7, text_left, "%-*s", text_width, "F6: urdf_inspector");
+    mvprintw(popup_top + 8, text_left, "%-*s", text_width, "Esc/Enter/F1: close help");
+  }
   refresh();
 }
 
@@ -383,7 +495,9 @@ void NodeCommanderScreen::draw_status_line(int row, int columns) const {
 }
 
 void NodeCommanderScreen::draw_help_line(int row, int columns) const {
-  draw_help_bar(row, columns, "Enter Open  Tab Pane  Alt+S Search  F4 Refresh  F10 Exit");
+  draw_help_bar(
+    row, columns,
+    "F1 Help  F2 Logs  F3 Services  F4 Topics  F5 Transforms  F6 URDF  Enter Open  Tab Pane  Alt+S Search  F10 Exit");
 }
 
 }  // namespace ros2_console_tools

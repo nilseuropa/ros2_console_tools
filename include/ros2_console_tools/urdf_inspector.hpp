@@ -20,6 +20,8 @@
 
 namespace ros2_console_tools {
 
+int run_urdf_inspector_tool(const std::string & target_node = "");
+
 inline std::string format_double(double value, int precision = 3) {
   std::ostringstream stream;
   stream << std::fixed << std::setprecision(precision) << value;
@@ -139,6 +141,7 @@ private:
   bool handle_key(int key);
   bool handle_search_key(int key);
   bool handle_popup_key(int key);
+  static std::vector<std::string> pretty_print_xml_lines(const std::string & text);
   static std::vector<std::string> split_lines(const std::string & text);
   std::vector<XmlSpan> highlight_xml_line(const std::string & line) const;
   int page_step() const;

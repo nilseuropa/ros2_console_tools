@@ -3,8 +3,26 @@
 #include <ncursesw/ncurses.h>
 
 #include <cctype>
+#include <thread>
 
 namespace ros2_console_tools {
+
+int run_urdf_inspector_tool(const std::string & target_node) {
+  auto backend = std::make_shared<UrdfInspectorBackend>(target_node);
+  UrdfInspectorScreen screen(backend);
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(backend);
+  std::thread spin_thread([&executor]() { executor.spin(); });
+
+  const int result = screen.run();
+
+  executor.cancel();
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+  return result;
+}
 
 namespace {
 
@@ -199,28 +217,94 @@ int UrdfInspectorScreen::page_step() const {
   return std::max(5, rows - 8);
 }
 
-std::vector<std::string> UrdfInspectorScreen::split_lines(const std::string & text) {
+std::vector<std::string> UrdfInspectorScreen::pretty_print_xml_lines(const std::string & text) {
   std::vector<std::string> lines;
-  std::stringstream stream(text);
-  std::string line;
-  while (std::getline(stream, line)) {
-    if (!line.empty() && line.back() == '\r') {
-      line.pop_back();
+  std::size_t index = 0;
+  int indent = 0;
+
+  auto push_line = [&lines](int line_indent, const std::string & content) {
+    if (content.empty()) {
+      return;
     }
-    std::string normalized;
-    normalized.reserve(line.size());
-    int column = 0;
-    for (char ch : line) {
-      if (ch == '\t') {
-        const int spaces = 2 - (column % 2);
-        normalized.append(static_cast<std::size_t>(spaces), ' ');
-        column += spaces;
-      } else {
-        normalized.push_back(ch);
-        ++column;
+    lines.push_back(std::string(static_cast<std::size_t>(std::max(0, line_indent) * 2), ' ') + content);
+  };
+
+  while (index < text.size()) {
+    const std::size_t tag_start = text.find('<', index);
+    if (tag_start == std::string::npos) {
+      const auto first = text.find_first_not_of(" \t\r\n", index);
+      if (first != std::string::npos) {
+        const auto last = text.find_last_not_of(" \t\r\n");
+        push_line(indent, text.substr(first, last - first + 1));
+      }
+      break;
+    }
+
+    const std::string between = text.substr(index, tag_start - index);
+    const auto text_first = between.find_first_not_of(" \t\r\n");
+    if (text_first != std::string::npos) {
+      const auto text_last = between.find_last_not_of(" \t\r\n");
+      push_line(indent, between.substr(text_first, text_last - text_first + 1));
+    }
+
+    const std::size_t tag_end = text.find('>', tag_start);
+    if (tag_end == std::string::npos) {
+      push_line(indent, text.substr(tag_start));
+      break;
+    }
+
+    const std::string tag = text.substr(tag_start, tag_end - tag_start + 1);
+    const bool closing = tag.size() >= 2 && tag[1] == '/';
+    const bool declaration = tag.size() >= 2 && tag[1] == '?';
+    const bool comment = tag.size() >= 4 && tag.compare(0, 4, "<!--") == 0;
+    const bool self_closing =
+      (!closing && !declaration && !comment && tag.size() >= 2 && tag[tag.size() - 2] == '/');
+
+    if (closing) {
+      indent = std::max(0, indent - 1);
+      push_line(indent, tag);
+    } else {
+      push_line(indent, tag);
+      if (!self_closing && !declaration && !comment) {
+        ++indent;
       }
     }
-    lines.push_back(std::move(normalized));
+
+    index = tag_end + 1;
+  }
+
+  if (lines.empty()) {
+    lines.push_back(text);
+  }
+  return lines;
+}
+
+std::vector<std::string> UrdfInspectorScreen::split_lines(const std::string & text) {
+  std::vector<std::string> lines;
+  if (text.find('\n') == std::string::npos) {
+    lines = pretty_print_xml_lines(text);
+  } else {
+    std::stringstream stream(text);
+  std::string line;
+    while (std::getline(stream, line)) {
+      if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+      }
+      std::string normalized;
+      normalized.reserve(line.size());
+      int column = 0;
+      for (char ch : line) {
+        if (ch == '\t') {
+          const int spaces = 2 - (column % 2);
+          normalized.append(static_cast<std::size_t>(spaces), ' ');
+          column += spaces;
+        } else {
+          normalized.push_back(ch);
+          ++column;
+        }
+      }
+      lines.push_back(std::move(normalized));
+    }
   }
   if (lines.empty()) {
     lines.push_back(text);

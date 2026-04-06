@@ -22,6 +22,8 @@
 
 namespace ros2_console_tools {
 
+int run_log_viewer_tool();
+
 using LogViewerClock = std::chrono::steady_clock;
 using LogMessage = rcl_interfaces::msg::Log;
 

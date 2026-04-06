@@ -6,12 +6,31 @@
 #include <cctype>
 #include <set>
 #include <sstream>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "ros2_console_tools/tui.hpp"
 
 namespace ros2_console_tools {
+
+int run_log_viewer_tool() {
+  auto backend = std::make_shared<LogViewerBackend>();
+  backend->initialize_subscription();
+  LogViewerScreen screen(backend);
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(backend);
+  std::thread spin_thread([&executor]() { executor.spin(); });
+
+  const int result = screen.run();
+
+  executor.cancel();
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+  return result;
+}
 
 namespace {
 

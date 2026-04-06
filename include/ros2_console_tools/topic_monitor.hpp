@@ -32,7 +32,7 @@
 
 namespace ros2_console_tools {
 
-int run_topic_monitor_tool(const std::string & initial_topic = "");
+int run_topic_monitor_tool(const std::string & initial_topic = "", bool embedded_mode = false);
 
 using TopicClock = std::chrono::steady_clock;
 using MessageMember = rosidl_typesupport_introspection_cpp::MessageMember;
@@ -209,6 +209,7 @@ private:
   void collapse_selected_namespace();
   void clamp_detail_selection(const std::vector<DetailRow> & rows);
   void select_initial_topic_if_present();
+  void expand_topic_namespace_path(const std::string & namespace_path);
 
   mutable std::mutex mutex_;
   std::map<std::string, TopicEntry> topics_;
@@ -229,7 +230,7 @@ private:
 
 class TopicMonitorScreen {
 public:
-  explicit TopicMonitorScreen(std::shared_ptr<TopicMonitorBackend> backend);
+  explicit TopicMonitorScreen(std::shared_ptr<TopicMonitorBackend> backend, bool embedded_mode = false);
   int run();
 
 private:
@@ -245,6 +246,7 @@ private:
   void draw_help_line(int row, int columns) const;
 
   std::shared_ptr<TopicMonitorBackend> backend_;
+  bool embedded_mode_{false};
   tui::SearchState search_state_;
 };
 

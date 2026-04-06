@@ -11,9 +11,9 @@
 
 namespace ros2_console_tools {
 
-int run_service_commander_tool(const std::string & initial_service) {
+int run_service_commander_tool(const std::string & initial_service, bool embedded_mode) {
   auto backend = std::make_shared<ServiceCommanderBackend>(initial_service);
-  ServiceCommanderScreen screen(backend);
+  ServiceCommanderScreen screen(backend, embedded_mode);
 
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(backend);
@@ -57,8 +57,10 @@ using tui::truncate_text;
 
 }  // namespace
 
-ServiceCommanderScreen::ServiceCommanderScreen(std::shared_ptr<ServiceCommanderBackend> backend)
-: backend_(std::move(backend)) {}
+ServiceCommanderScreen::ServiceCommanderScreen(
+  std::shared_ptr<ServiceCommanderBackend> backend, bool embedded_mode)
+: backend_(std::move(backend)),
+  embedded_mode_(embedded_mode) {}
 
 int ServiceCommanderScreen::run() {
   Session ncurses_session;
@@ -106,6 +108,9 @@ bool ServiceCommanderScreen::handle_service_list_key(int key) {
         start_search(search_state_);
         backend_->status_line_ = "Search.";
         return true;
+      }
+      if (embedded_mode_) {
+        return false;
       }
       return true;
     case KEY_UP:
@@ -172,6 +177,9 @@ bool ServiceCommanderScreen::handle_service_detail_key(int key) {
     case KEY_F(10):
       return false;
     case 27:
+      if (embedded_mode_) {
+        return false;
+      }
       backend_->close_service_detail();
       return true;
     case KEY_F(4):

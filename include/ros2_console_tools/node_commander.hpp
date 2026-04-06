@@ -82,6 +82,11 @@ private:
   bool handle_key(int key);
   bool handle_search_key(int key);
   int page_step() const;
+  bool launch_log_viewer();
+  bool launch_service_commander();
+  bool launch_topic_monitor();
+  bool launch_tf_monitor();
+  bool launch_urdf_inspector();
   bool launch_selected_node_parameters();
   bool launch_selected_detail_action();
   const DetailLine * selected_detail_line() const;
@@ -97,6 +102,7 @@ private:
   int detail_selected_index_{0};
   int detail_scroll_{0};
   std::vector<DetailLine> detail_lines_cache_;
+  bool help_popup_open_{false};
 };
 
 }  // namespace ros2_console_tools

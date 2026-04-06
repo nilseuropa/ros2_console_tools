@@ -23,6 +23,8 @@
 
 namespace ros2_console_tools {
 
+int run_tf_monitor_tool();
+
 using TfClock = std::chrono::steady_clock;
 using TFMessage = tf2_msgs::msg::TFMessage;
 using TransformStamped = geometry_msgs::msg::TransformStamped;

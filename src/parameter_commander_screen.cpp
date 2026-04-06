@@ -7,9 +7,9 @@
 
 namespace ros2_console_tools {
 
-int run_parameter_commander_tool(const std::string & target_node) {
+int run_parameter_commander_tool(const std::string & target_node, bool embedded_mode) {
   auto backend = std::make_shared<ParameterCommanderBackend>(target_node);
-  ParameterCommanderScreen screen(backend);
+  ParameterCommanderScreen screen(backend, embedded_mode);
 
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(backend);
@@ -56,8 +56,10 @@ using tui::start_search;
 
 }  // namespace
 
-ParameterCommanderScreen::ParameterCommanderScreen(std::shared_ptr<ParameterCommanderBackend> backend)
-: backend_(std::move(backend)) {}
+ParameterCommanderScreen::ParameterCommanderScreen(
+  std::shared_ptr<ParameterCommanderBackend> backend, bool embedded_mode)
+: backend_(std::move(backend)),
+  embedded_mode_(embedded_mode) {}
 
 int ParameterCommanderScreen::run() {
   Session ncurses_session;
@@ -119,6 +121,9 @@ bool ParameterCommanderScreen::handle_key(int key) {
         close_popup();
         backend_->switch_to_node_list();
         return true;
+      }
+      if (embedded_mode_) {
+        return false;
       }
       break;
     case '\n':

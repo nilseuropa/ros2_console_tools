@@ -59,6 +59,7 @@ void TopicMonitorBackend::select_initial_topic_if_present() {
     return;
   }
 
+  expand_topic_namespace_path(topic_namespace(initial_topic_name_));
   const auto items = visible_topic_items();
   for (std::size_t index = 0; index < items.size(); ++index) {
     if (!items[index].is_namespace && items[index].row.name == initial_topic_name_) {
@@ -66,6 +67,24 @@ void TopicMonitorBackend::select_initial_topic_if_present() {
       initial_topic_name_.clear();
       return;
     }
+  }
+}
+
+void TopicMonitorBackend::expand_topic_namespace_path(const std::string & namespace_path) {
+  if (namespace_path.empty()) {
+    return;
+  }
+
+  std::size_t start = 0;
+  while (start < namespace_path.size()) {
+    const auto slash = namespace_path.find('/', start);
+    const std::string path =
+      slash == std::string::npos ? namespace_path : namespace_path.substr(0, slash);
+    collapsed_topic_namespaces_[path] = false;
+    if (slash == std::string::npos) {
+      break;
+    }
+    start = slash + 1;
   }
 }
 

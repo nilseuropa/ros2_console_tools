@@ -126,6 +126,7 @@ target_link_libraries(
   ${NCURSESW_LIBRARY}
   parameter_commander_lib
   topic_monitor_lib
+  log_viewer_lib
 )
 
 add_executable(node_commander src/node_commander.cpp)
@@ -194,6 +195,8 @@ install(TARGETS tf_monitor_lib tf_monitor
   DESTINATION lib/${PROJECT_NAME}
 )
 
+target_link_libraries(node_commander_lib tf_monitor_lib)
+
 add_library(urdf_inspector_lib
   src/urdf_inspector_backend.cpp
   src/urdf_inspector_screen.cpp
@@ -218,6 +221,8 @@ target_link_libraries(urdf_inspector urdf_inspector_lib)
 install(TARGETS urdf_inspector_lib urdf_inspector
   DESTINATION lib/${PROJECT_NAME}
 )
+
+target_link_libraries(node_commander_lib urdf_inspector_lib)
 
 install(DIRECTORY include/
   DESTINATION include

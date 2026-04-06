@@ -21,7 +21,7 @@
 
 namespace ros2_console_tools {
 
-int run_parameter_commander_tool(const std::string & target_node = "");
+int run_parameter_commander_tool(const std::string & target_node = "", bool embedded_mode = false);
 
 using ParameterDescriptor = rcl_interfaces::msg::ParameterDescriptor;
 using ParameterType = rcl_interfaces::msg::ParameterType;
@@ -280,7 +280,8 @@ private:
 
 class ParameterCommanderScreen {
 public:
-  explicit ParameterCommanderScreen(std::shared_ptr<ParameterCommanderBackend> backend);
+  explicit ParameterCommanderScreen(
+    std::shared_ptr<ParameterCommanderBackend> backend, bool embedded_mode = false);
   int run();
 
 private:
@@ -302,6 +303,7 @@ private:
   void draw_help_line(int row, int columns) const;
 
   std::shared_ptr<ParameterCommanderBackend> backend_;
+  bool embedded_mode_{false};
   bool popup_open_{false};
   bool popup_dirty_{false};
   tui::SearchState search_state_;

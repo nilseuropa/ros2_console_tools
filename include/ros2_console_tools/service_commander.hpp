@@ -24,7 +24,7 @@
 
 namespace ros2_console_tools {
 
-int run_service_commander_tool(const std::string & initial_service = "");
+int run_service_commander_tool(const std::string & initial_service = "", bool embedded_mode = false);
 
 using MessageMember = rosidl_typesupport_introspection_cpp::MessageMember;
 using MessageMembers = rosidl_typesupport_introspection_cpp::MessageMembers;
@@ -144,7 +144,8 @@ private:
 
 class ServiceCommanderScreen {
 public:
-  explicit ServiceCommanderScreen(std::shared_ptr<ServiceCommanderBackend> backend);
+  explicit ServiceCommanderScreen(
+    std::shared_ptr<ServiceCommanderBackend> backend, bool embedded_mode = false);
   int run();
 
 private:
@@ -163,6 +164,7 @@ private:
   void draw_help_line(int row, int columns) const;
 
   std::shared_ptr<ServiceCommanderBackend> backend_;
+  bool embedded_mode_{false};
   tui::SearchState search_state_;
   bool edit_popup_open_{false};
   bool edit_popup_dirty_{false};
