@@ -12,7 +12,9 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+set(CURSES_NEED_WIDE TRUE)
 find_package(Curses REQUIRED)
+find_library(NCURSESW_LIBRARY NAMES ncursesw)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rcl_interfaces REQUIRED)
@@ -33,7 +35,7 @@ ament_target_dependencies(parameter_commander
   rclcpp
 )
 target_include_directories(parameter_commander PRIVATE ${CURSES_INCLUDE_DIR})
-target_link_libraries(parameter_commander ${CURSES_LIBRARIES})
+target_link_libraries(parameter_commander ${NCURSESW_LIBRARY})
 
 install(TARGETS parameter_commander
   DESTINATION lib/${PROJECT_NAME}
@@ -45,7 +47,7 @@ ament_target_dependencies(topic_monitor
   rosidl_typesupport_introspection_cpp
 )
 target_include_directories(topic_monitor PRIVATE ${CURSES_INCLUDE_DIR})
-target_link_libraries(topic_monitor ${CURSES_LIBRARIES})
+target_link_libraries(topic_monitor ${NCURSESW_LIBRARY})
 
 install(TARGETS topic_monitor
   DESTINATION lib/${PROJECT_NAME}
@@ -57,7 +59,7 @@ ament_target_dependencies(log_viewer
   rclcpp
 )
 target_include_directories(log_viewer PRIVATE ${CURSES_INCLUDE_DIR})
-target_link_libraries(log_viewer ${CURSES_LIBRARIES})
+target_link_libraries(log_viewer ${NCURSESW_LIBRARY})
 
 install(TARGETS log_viewer
   DESTINATION lib/${PROJECT_NAME}
@@ -69,7 +71,7 @@ ament_target_dependencies(service_commander
   rosidl_typesupport_introspection_cpp
 )
 target_include_directories(service_commander PRIVATE ${CURSES_INCLUDE_DIR})
-target_link_libraries(service_commander ${CURSES_LIBRARIES})
+target_link_libraries(service_commander ${NCURSESW_LIBRARY})
 
 install(TARGETS service_commander
   DESTINATION lib/${PROJECT_NAME}

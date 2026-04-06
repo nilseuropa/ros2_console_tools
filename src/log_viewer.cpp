@@ -1,11 +1,13 @@
-#include <ncurses.h>
+#include <ncursesw/ncurses.h>
 
 #include <algorithm>
 #include <chrono>
 #include <clocale>
 #include <cstdint>
+#include <cwchar>
 #include <deque>
 #include <iomanip>
+#include <langinfo.h>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -94,6 +96,31 @@ std::string truncate_text(const std::string & text, int width) {
     return text.substr(0, static_cast<std::size_t>(width));
   }
   return text.substr(0, static_cast<std::size_t>(width - 3)) + "...";
+}
+
+bool use_unicode_line_drawing() {
+  const char * codeset = nl_langinfo(CODESET);
+  return codeset != nullptr && std::string(codeset).find("UTF-8") != std::string::npos;
+}
+
+void draw_box_char(int row, int col, const cchar_t * wide_char, char ascii_char) {
+  if (use_unicode_line_drawing()) {
+    mvadd_wch(row, col, wide_char);
+  } else {
+    mvaddch(row, col, ascii_char);
+  }
+}
+
+void draw_text_hline(int row, int col, int count) {
+  for (int index = 0; index < count; ++index) {
+    draw_box_char(row, col + index, WACS_HLINE, '-');
+  }
+}
+
+void draw_text_vline(int row, int col, int count) {
+  for (int index = 0; index < count; ++index) {
+    draw_box_char(row + index, col, WACS_VLINE, '|');
+  }
 }
 
 std::string time_string(const builtin_interfaces::msg::Time & stamp) {
@@ -596,7 +623,7 @@ private:
       const int separator_x = 1 + left_width;
       draw_sources_pane(1, 1, content_bottom - 1, separator_x - 1);
       attron(COLOR_PAIR(kColorFrame));
-      mvvline(1, separator_x, ACS_VLINE, content_bottom - 1);
+      draw_text_vline(1, separator_x, content_bottom - 1);
       attroff(COLOR_PAIR(kColorFrame));
       draw_logs_pane(1, separator_x + 1, content_bottom - 1, columns - 2);
     } else {
@@ -613,14 +640,14 @@ private:
 
   void draw_box(int top, int left, int bottom, int right) const {
     attron(COLOR_PAIR(kColorFrame));
-    mvaddch(top, left, ACS_ULCORNER);
-    mvaddch(top, right, ACS_URCORNER);
-    mvaddch(bottom, left, ACS_LLCORNER);
-    mvaddch(bottom, right, ACS_LRCORNER);
-    mvhline(top, left + 1, ACS_HLINE, right - left - 1);
-    mvhline(bottom, left + 1, ACS_HLINE, right - left - 1);
-    mvvline(top + 1, left, ACS_VLINE, bottom - top - 1);
-    mvvline(top + 1, right, ACS_VLINE, bottom - top - 1);
+    draw_box_char(top, left, WACS_ULCORNER, '+');
+    draw_box_char(top, right, WACS_URCORNER, '+');
+    draw_box_char(bottom, left, WACS_LLCORNER, '+');
+    draw_box_char(bottom, right, WACS_LRCORNER, '+');
+    draw_text_hline(top, left + 1, right - left - 1);
+    draw_text_hline(bottom, left + 1, right - left - 1);
+    draw_text_vline(top + 1, left, bottom - top - 1);
+    draw_text_vline(top + 1, right, bottom - top - 1);
     attroff(COLOR_PAIR(kColorFrame));
   }
 
@@ -690,11 +717,11 @@ private:
 
     attron(COLOR_PAIR(kColorHeader));
     mvprintw(top, left, "%-*s", time_width, "Time");
-    mvaddch(top, sep_one_x, ACS_VLINE);
+    draw_box_char(top, sep_one_x, WACS_VLINE, '|');
     mvprintw(top, sep_one_x + 1, "%-*s", level_width, "Level");
-    mvaddch(top, sep_two_x, ACS_VLINE);
+    draw_box_char(top, sep_two_x, WACS_VLINE, '|');
     mvprintw(top, sep_two_x + 1, "%-*s", source_width, "Source");
-    mvaddch(top, sep_three_x, ACS_VLINE);
+    draw_box_char(top, sep_three_x, WACS_VLINE, '|');
     mvprintw(top, sep_three_x + 1, "%-*s", message_width, "Message");
     attroff(COLOR_PAIR(kColorHeader));
 
@@ -708,10 +735,9 @@ private:
         mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
       }
 
-      const chtype separator = selected && focus_ == PaneFocus::Logs ? '|' : ACS_VLINE;
-      mvaddch(row, sep_one_x, separator);
-      mvaddch(row, sep_two_x, separator);
-      mvaddch(row, sep_three_x, separator);
+      draw_box_char(row, sep_one_x, WACS_VLINE, '|');
+      draw_box_char(row, sep_two_x, WACS_VLINE, '|');
+      draw_box_char(row, sep_three_x, WACS_VLINE, '|');
       if (!has_item) {
         continue;
       }
@@ -730,9 +756,9 @@ private:
       }
       if (selected && focus_ == PaneFocus::Logs) {
         mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
-        mvaddch(row, sep_one_x, '|');
-        mvaddch(row, sep_two_x, '|');
-        mvaddch(row, sep_three_x, '|');
+        draw_box_char(row, sep_one_x, WACS_VLINE, '|');
+        draw_box_char(row, sep_two_x, WACS_VLINE, '|');
+        draw_box_char(row, sep_three_x, WACS_VLINE, '|');
         if (color != 0) {
           mvchgat(row, left, time_width, A_NORMAL, color, nullptr);
           mvchgat(row, sep_one_x + 1, level_width, A_NORMAL, color, nullptr);

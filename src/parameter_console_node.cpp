@@ -1,10 +1,12 @@
-#include <ncurses.h>
+#include <ncursesw/ncurses.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cctype>
 #include <clocale>
 #include <cstdlib>
+#include <cwchar>
+#include <langinfo.h>
 #include <memory>
 #include <limits>
 #include <map>
@@ -98,6 +100,31 @@ int visible_width(const std::string & line) {
     ++width;
   }
   return width;
+}
+
+bool use_unicode_line_drawing() {
+  const char * codeset = nl_langinfo(CODESET);
+  return codeset != nullptr && std::string(codeset).find("UTF-8") != std::string::npos;
+}
+
+void draw_box_char(int row, int col, const cchar_t * wide_char, char ascii_char) {
+  if (use_unicode_line_drawing()) {
+    mvadd_wch(row, col, wide_char);
+  } else {
+    mvaddch(row, col, ascii_char);
+  }
+}
+
+void draw_text_hline(int row, int col, int count) {
+  for (int index = 0; index < count; ++index) {
+    draw_box_char(row, col + index, WACS_HLINE, '-');
+  }
+}
+
+void draw_text_vline(int row, int col, int count) {
+  for (int index = 0; index < count; ++index) {
+    draw_box_char(row + index, col, WACS_VLINE, '|');
+  }
 }
 
 std::string truncate_line(const std::string & line, int max_columns) {
@@ -952,14 +979,14 @@ private:
 
   void draw_box(int top, int left, int bottom, int right) const {
     attron(COLOR_PAIR(kColorFrame));
-    mvaddch(top, left, ACS_ULCORNER);
-    mvaddch(top, right, ACS_URCORNER);
-    mvaddch(bottom, left, ACS_LLCORNER);
-    mvaddch(bottom, right, ACS_LRCORNER);
-    mvhline(top, left + 1, ACS_HLINE, right - left - 1);
-    mvhline(bottom, left + 1, ACS_HLINE, right - left - 1);
-    mvvline(top + 1, left, ACS_VLINE, bottom - top - 1);
-    mvvline(top + 1, right, ACS_VLINE, bottom - top - 1);
+    draw_box_char(top, left, WACS_ULCORNER, '+');
+    draw_box_char(top, right, WACS_URCORNER, '+');
+    draw_box_char(bottom, left, WACS_LLCORNER, '+');
+    draw_box_char(bottom, right, WACS_LRCORNER, '+');
+    draw_text_hline(top, left + 1, right - left - 1);
+    draw_text_hline(bottom, left + 1, right - left - 1);
+    draw_text_vline(top + 1, left, bottom - top - 1);
+    draw_text_vline(top + 1, right, bottom - top - 1);
     attroff(COLOR_PAIR(kColorFrame));
   }
 
@@ -987,8 +1014,8 @@ private:
     attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
 
     attron(COLOR_PAIR(kColorFrame));
-    mvvline(top, separator_one_x, ACS_VLINE, visible_rows);
-    mvvline(top, separator_two_x, ACS_VLINE, visible_rows);
+    draw_text_vline(top, separator_one_x, visible_rows);
+    draw_text_vline(top, separator_two_x, visible_rows);
     attroff(COLOR_PAIR(kColorFrame));
 
     for (int row = 1; row < visible_rows; ++row) {
@@ -1009,8 +1036,8 @@ private:
         } else {
           attron(COLOR_PAIR(kColorFrame));
         }
-        mvaddch(row_y, separator_one_x, ACS_VLINE);
-        mvaddch(row_y, separator_two_x, ACS_VLINE);
+        draw_box_char(row_y, separator_one_x, WACS_VLINE, '|');
+        draw_box_char(row_y, separator_two_x, WACS_VLINE, '|');
         if (is_selected) {
           attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
         } else {
@@ -1031,8 +1058,8 @@ private:
       } else {
         attron(COLOR_PAIR(kColorFrame));
       }
-      mvaddch(row_y, separator_one_x, ACS_VLINE);
-      mvaddch(row_y, separator_two_x, ACS_VLINE);
+      draw_box_char(row_y, separator_one_x, WACS_VLINE, '|');
+      draw_box_char(row_y, separator_two_x, WACS_VLINE, '|');
       if (entry_index == selected_parameter_item_index_) {
         attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
       } else {
@@ -1051,8 +1078,8 @@ private:
       if (is_selected) {
         mvchgat(row_y, left, width, A_BOLD, kColorSelection, nullptr);
         attron(COLOR_PAIR(kColorSelection) | A_BOLD);
-        mvaddch(row_y, separator_one_x, ACS_VLINE);
-        mvaddch(row_y, separator_two_x, ACS_VLINE);
+        draw_box_char(row_y, separator_one_x, WACS_VLINE, '|');
+        draw_box_char(row_y, separator_two_x, WACS_VLINE, '|');
         attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
         attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
       } else if (item.is_namespace) {
@@ -1246,14 +1273,14 @@ private:
 
     if (popup_dirty_) {
       attron(COLOR_PAIR(kColorDirty));
-      mvaddch(top, left, ACS_ULCORNER);
-      mvaddch(top, right, ACS_URCORNER);
-      mvaddch(bottom, left, ACS_LLCORNER);
-      mvaddch(bottom, right, ACS_LRCORNER);
-      mvhline(top, left + 1, ACS_HLINE, right - left - 1);
-      mvhline(bottom, left + 1, ACS_HLINE, right - left - 1);
-      mvvline(top + 1, left, ACS_VLINE, bottom - top - 1);
-      mvvline(top + 1, right, ACS_VLINE, bottom - top - 1);
+      draw_box_char(top, left, WACS_ULCORNER, '+');
+      draw_box_char(top, right, WACS_URCORNER, '+');
+      draw_box_char(bottom, left, WACS_LLCORNER, '+');
+      draw_box_char(bottom, right, WACS_LRCORNER, '+');
+      draw_text_hline(top, left + 1, right - left - 1);
+      draw_text_hline(bottom, left + 1, right - left - 1);
+      draw_text_vline(top + 1, left, bottom - top - 1);
+      draw_text_vline(top + 1, right, bottom - top - 1);
       attroff(COLOR_PAIR(kColorDirty));
     } else {
       draw_box(top, left, bottom, right);
@@ -1290,7 +1317,7 @@ private:
         + "  [" + parameter_min(*entry) + "]"
         + "  [" + parameter_max(*entry) + "]");
     draw_popup_field(top + 4, "current", summary_value(*entry));
-    mvhline(top + 5, left + 1, ACS_HLINE, inner_width);
+    draw_text_hline(top + 5, left + 1, inner_width);
     attroff(COLOR_PAIR(kColorPopup));
     draw_box(field_top, field_left, field_top + 2, field_right);
     attron(COLOR_PAIR(kColorHeader) | A_BOLD);
@@ -1313,7 +1340,7 @@ private:
     }
 
     attron(COLOR_PAIR(kColorPopup));
-    mvhline(bottom - 2, left + 1, ACS_HLINE, inner_width);
+    draw_text_hline(bottom - 2, left + 1, inner_width);
     mvaddnstr(bottom - 1, left + 1, "F3 Load  F2 Save  Esc Close  F10 Exit", inner_width);
     attroff(COLOR_PAIR(kColorPopup));
   }
