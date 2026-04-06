@@ -15,7 +15,7 @@
     attention.ultrasound_ground_clearance_min: 0.10000000000000001
     attention.ultrasound_half_life: 0.10000000000000001
     attention.ultrasound_range_min_cutoff: 0
-    attention.use_clearance_polygon: false
+    attention.use_clearance_polygon: true
     attention.use_pcl_confidence: false
     attention.use_range_confidence: false
     attention.weight_lidar: 0.5
@@ -101,4 +101,4 @@
     steer_assist.use_odom_lookahead_blend: true
     tof_sensor.num_of_rays: 64
     tof_sensor.update_rate: 10
-checksum: 478cac4576518675fb4bdfe577614687fbc33f406a54ad7b50eab4aa6d5df5aa
+checksum: c28eeb85e236447ffcb1f7725e38f9c8b510a73b89d29517e77bfa70eb8ba99c

@@ -60,6 +60,7 @@ void draw_text_vline(int row, int col, int count);
 void draw_box(int top, int left, int bottom, int right, int color_pair);
 void draw_bar(int row, int columns, const std::string & text, int color_pair, int left_padding = 1);
 void draw_status_bar(int row, int columns, const std::string & text);
+void draw_help_bar_region(int row, int left, int width, const std::string & text);
 void draw_help_bar(int row, int columns, const std::string & text);
 
 }  // namespace ros2_console_tools::tui

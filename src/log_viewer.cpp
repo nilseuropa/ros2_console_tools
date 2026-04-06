@@ -62,6 +62,7 @@ using tui::draw_box;
 using tui::draw_box_char;
 using tui::draw_status_bar;
 using tui::draw_help_bar;
+using tui::draw_help_bar_region;
 using tui::draw_text_vline;
 
 std::string time_string(const builtin_interfaces::msg::Time & stamp) {
@@ -1066,7 +1067,7 @@ private:
     print_line(top + 5, "function: ", detail_entry_.function_name);
     print_line(top + 6, "line: ", std::to_string(detail_entry_.line));
     print_line(top + 8, "message: ", detail_entry_.message);
-    mvprintw(bottom - 1, left + 2, "%s", truncate_text("F2 Inspect Code  Esc Close  Enter Close  F10 Exit", popup_width - 4).c_str());
+    draw_help_bar_region(bottom - 1, left + 2, popup_width - 4, "F2 Inspect Code  Esc Close  Enter Close  F10 Exit");
   }
 
   void clamp_source_selection(const std::vector<SourceEntry> & snapshot) {

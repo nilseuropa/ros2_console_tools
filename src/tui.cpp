@@ -200,14 +200,15 @@ void draw_status_bar(int row, int columns, const std::string & text) {
   attroff(COLOR_PAIR(kColorStatus) | color.attributes);
 }
 
-void draw_help_bar(int row, int columns, const std::string & text) {
+void draw_help_bar_region(int row, int left, int width, const std::string & text) {
   attrset(A_NORMAL);
-  mvhline(row, 0, ' ', columns);
+  mvhline(row, left, ' ', width);
 
-  int column = 0;
+  int column = left;
+  const int right = left + width;
   bool first_block = true;
   for (const auto & block : parse_help_blocks(text)) {
-    if (column >= columns) {
+    if (column >= right) {
       break;
     }
 
@@ -215,41 +216,41 @@ void draw_help_bar(int row, int columns, const std::string & text) {
       attrset(A_NORMAL);
       mvaddch(row, column, ' ');
       ++column;
-      if (column >= columns) {
+      if (column >= right) {
         break;
       }
     }
 
-    const std::string key = truncate_text(block.key, std::max(0, columns - column));
+    const std::string key = truncate_text(block.key, std::max(0, right - column));
     if (key.empty()) {
       continue;
     }
 
     const auto & help_key_color = current_theme()[kColorHelpKey];
     attron(COLOR_PAIR(kColorHelpKey) | help_key_color.attributes);
-    mvaddnstr(row, column, key.c_str(), columns - column);
+    mvaddnstr(row, column, key.c_str(), right - column);
     attroff(COLOR_PAIR(kColorHelpKey) | help_key_color.attributes);
     column += static_cast<int>(key.size());
-    if (column >= columns) {
+    if (column >= right) {
       break;
     }
 
     if (!block.label.empty()) {
       const std::string separator = " ";
       attron(COLOR_PAIR(kColorHelp));
-      mvaddnstr(row, column, separator.c_str(), columns - column);
+      mvaddnstr(row, column, separator.c_str(), right - column);
       attroff(COLOR_PAIR(kColorHelp));
       column += static_cast<int>(separator.size());
-      if (column >= columns) {
+      if (column >= right) {
         break;
       }
 
-      const std::string label = truncate_text(block.label, std::max(0, columns - column));
+      const std::string label = truncate_text(block.label, std::max(0, right - column));
       attron(COLOR_PAIR(kColorHelp));
-      mvaddnstr(row, column, label.c_str(), columns - column);
+      mvaddnstr(row, column, label.c_str(), right - column);
       attroff(COLOR_PAIR(kColorHelp));
       column += static_cast<int>(label.size());
-      if (column >= columns) {
+      if (column >= right) {
         break;
       }
 
@@ -257,12 +258,16 @@ void draw_help_bar(int row, int columns, const std::string & text) {
       mvaddch(row, column, ' ');
       attroff(COLOR_PAIR(kColorHelp));
       ++column;
-      if (column >= columns) {
+      if (column >= right) {
         break;
       }
     }
     first_block = false;
   }
+}
+
+void draw_help_bar(int row, int columns, const std::string & text) {
+  draw_help_bar_region(row, 0, columns, text);
 }
 
 }  // namespace ros2_console_tools::tui

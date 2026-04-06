@@ -105,6 +105,7 @@ using tui::Session;
 using tui::draw_box;
 using tui::draw_box_char;
 using tui::draw_help_bar;
+using tui::draw_help_bar_region;
 using tui::draw_status_bar;
 using tui::draw_text_hline;
 using tui::draw_text_vline;
@@ -1310,8 +1311,8 @@ private:
 
     attron(COLOR_PAIR(kColorPopup));
     draw_text_hline(bottom - 2, left + 1, inner_width);
-    mvaddnstr(bottom - 1, left + 1, "F3 Load  F2 Save  Esc Close  F10 Exit", inner_width);
     attroff(COLOR_PAIR(kColorPopup));
+    draw_help_bar_region(bottom - 1, left + 1, inner_width, "F3 Load  F2 Save  Esc Close  F10 Exit");
   }
 
   std::string descriptor_summary(const ParameterDescriptor & descriptor) const {
