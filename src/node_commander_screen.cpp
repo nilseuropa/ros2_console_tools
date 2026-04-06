@@ -125,7 +125,9 @@ bool NodeCommanderScreen::handle_key(int key) {
       if (is_alt_binding(key, 's')) {
         start_search(search_state_);
         std::lock_guard<std::mutex> lock(backend_->mutex_);
-        backend_->status_line_ = "Search.";
+        backend_->status_line_ = focus_pane_ == NodeCommanderFocusPane::NodeList
+          ? "Search nodes."
+          : "Search details.";
       }
       return true;
     case KEY_UP:
@@ -195,9 +197,21 @@ bool NodeCommanderScreen::handle_search_key(int key) {
     return true;
   }
 
-  const int match = find_best_match(backend_->node_entries_, search_state_.query, backend_->selected_index_);
-  if (match >= 0) {
-    backend_->selected_index_ = match;
+  if (focus_pane_ == NodeCommanderFocusPane::NodeList) {
+    const int match = find_best_match(backend_->node_entries_, search_state_.query, backend_->selected_index_);
+    if (match >= 0) {
+      backend_->selected_index_ = match;
+    }
+  } else {
+    std::vector<std::string> labels;
+    labels.reserve(detail_lines_cache_.size());
+    for (const auto & line : detail_lines_cache_) {
+      labels.push_back(line.text);
+    }
+    const int match = find_best_match(labels, search_state_.query, detail_selected_index_);
+    if (match >= 0) {
+      detail_selected_index_ = match;
+    }
   }
   std::lock_guard<std::mutex> lock(backend_->mutex_);
   backend_->status_line_ = "Search: " + search_state_.query;
