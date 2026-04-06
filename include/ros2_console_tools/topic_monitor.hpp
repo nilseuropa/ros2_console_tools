@@ -27,6 +27,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <optional>
 
 #include "ros2_console_tools/tui.hpp"
 
@@ -114,6 +115,14 @@ struct DetailRow {
   int depth{0};
   std::string field;
   std::string value;
+  std::string path;
+  bool numeric{false};
+  double numeric_value{0.0};
+};
+
+struct PlotSample {
+  TopicClock::time_point time;
+  double value{0.0};
 };
 
 struct TopicIntrospection {
@@ -135,6 +144,7 @@ struct TopicEntry {
   std::deque<IntervalSample> intervals;
   std::size_t sample_bytes_sum{0};
   std::vector<DetailRow> detail_rows;
+  std::map<std::string, std::deque<PlotSample>> plot_samples;
   std::string detail_error;
 };
 
@@ -178,6 +188,9 @@ private:
   void maybe_refresh_topics();
   std::vector<TopicRow> topic_rows_snapshot() const;
   std::vector<DetailRow> detail_rows_snapshot(const std::string & topic_name) const;
+  std::vector<DetailRow> visible_detail_rows_snapshot(const std::string & topic_name) const;
+  std::vector<PlotSample> plot_samples_snapshot(
+    const std::string & topic_name, const std::string & field_path) const;
   std::string detail_error_snapshot(const std::string & topic_name) const;
   static void compute_stats(
     const TopicEntry & entry, std::string & avg_hz, std::string & min_max_hz, std::string & bandwidth);
@@ -191,15 +204,17 @@ private:
   std::vector<DetailRow> decode_detail_rows(
     const std::string & type, const rclcpp::SerializedMessage & message);
   void append_message_members(
-    std::vector<DetailRow> & rows, int depth, const MessageMembers * members, const void * message_memory) const;
+    std::vector<DetailRow> & rows, int depth, const std::string & parent_path,
+    const MessageMembers * members, const void * message_memory) const;
   std::string normalize_member_label(
     const MessageMembers & parent_members, const MessageMember & member) const;
   void append_member(
-    std::vector<DetailRow> & rows, int depth, const std::string & label,
+    std::vector<DetailRow> & rows, int depth, const std::string & parent_path, const std::string & label,
     const MessageMember & member, const void * field_memory) const;
   std::string array_element_to_string(
     const MessageMember & member, const void * field_memory, std::size_t index) const;
   std::string scalar_field_to_string(uint8_t type_id, const void * field_memory) const;
+  std::optional<double> scalar_field_to_double(uint8_t type_id, const void * field_memory) const;
   void clamp_topic_selection(const std::vector<TopicListItem> & items);
   std::string topic_namespace(const std::string & topic_name) const;
   std::string topic_leaf_name(const std::string & topic_name) const;
@@ -208,6 +223,12 @@ private:
   void expand_selected_namespace();
   void collapse_selected_namespace();
   void clamp_detail_selection(const std::vector<DetailRow> & rows);
+  void clamp_visible_detail_selection();
+  void expand_selected_detail_row();
+  void collapse_selected_detail_row();
+  bool selected_detail_row_can_plot() const;
+  std::optional<DetailRow> selected_visible_detail_row() const;
+  bool detail_row_has_children(const std::vector<DetailRow> & rows, std::size_t index) const;
   void select_initial_topic_if_present();
   void expand_topic_namespace_path(const std::string & namespace_path);
 
@@ -222,6 +243,7 @@ private:
   int list_scroll_{0};
   int selected_detail_index_{0};
   int detail_scroll_{0};
+  std::map<std::string, bool> collapsed_detail_paths_;
   bool show_only_monitored_{false};
   std::string detail_topic_name_;
   std::string status_line_{"Loading topics..."};
@@ -239,16 +261,22 @@ private:
   bool handle_search_key(int key);
   bool handle_topic_detail_key(int key);
   bool launch_selected_visualizer();
+  bool launch_selected_plot();
   int page_step() const;
   void draw();
   void draw_topic_list(int top, int left, int bottom, int right);
   void draw_topic_detail(int top, int left, int bottom, int right);
+  void draw_plot_popup(int rows, int columns) const;
   void draw_status_line(int row, int columns) const;
   void draw_help_line(int row, int columns) const;
 
   std::shared_ptr<TopicMonitorBackend> backend_;
   bool embedded_mode_{false};
   tui::SearchState search_state_;
+  bool plot_popup_open_{false};
+  std::string plot_topic_name_;
+  std::string plot_field_name_;
+  std::string plot_field_path_;
 };
 
 }  // namespace ros2_console_tools

@@ -145,6 +145,50 @@ std::vector<DetailRow> TopicMonitorBackend::detail_rows_snapshot(const std::stri
   return found->second.detail_rows;
 }
 
+std::vector<DetailRow> TopicMonitorBackend::visible_detail_rows_snapshot(const std::string & topic_name) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto found = topics_.find(topic_name);
+  if (found == topics_.end()) {
+    return {};
+  }
+
+  std::vector<DetailRow> visible;
+  visible.reserve(found->second.detail_rows.size());
+  int hidden_depth = -1;
+  for (std::size_t index = 0; index < found->second.detail_rows.size(); ++index) {
+    const auto & row = found->second.detail_rows[index];
+    if (hidden_depth >= 0) {
+      if (row.depth > hidden_depth) {
+        continue;
+      }
+      hidden_depth = -1;
+    }
+    visible.push_back(row);
+    if (detail_row_has_children(found->second.detail_rows, index)) {
+      const auto collapsed = collapsed_detail_paths_.find(row.path);
+      if (collapsed != collapsed_detail_paths_.end() && collapsed->second) {
+        hidden_depth = row.depth;
+      }
+    }
+  }
+  return visible;
+}
+
+std::vector<PlotSample> TopicMonitorBackend::plot_samples_snapshot(
+  const std::string & topic_name, const std::string & field_path) const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto found = topics_.find(topic_name);
+  if (found == topics_.end()) {
+    return {};
+  }
+  const auto sample_found = found->second.plot_samples.find(field_path);
+  if (sample_found == found->second.plot_samples.end()) {
+    return {};
+  }
+  return std::vector<PlotSample>(sample_found->second.begin(), sample_found->second.end());
+}
+
 std::string TopicMonitorBackend::detail_error_snapshot(const std::string & topic_name) const {
   std::lock_guard<std::mutex> lock(mutex_);
   const auto found = topics_.find(topic_name);
@@ -236,6 +280,7 @@ void TopicMonitorBackend::open_selected_topic_detail() {
   detail_topic_name_ = item.row.name;
   detail_scroll_ = 0;
   selected_detail_index_ = 0;
+  collapsed_detail_paths_.clear();
   view_mode_ = TopicMonitorViewMode::TopicDetail;
 
   TopicEntry snapshot;
@@ -267,6 +312,7 @@ void TopicMonitorBackend::close_topic_detail() {
   detail_topic_name_.clear();
   detail_scroll_ = 0;
   selected_detail_index_ = 0;
+  collapsed_detail_paths_.clear();
   status_line_ = "Returned to topic list.";
 }
 
@@ -310,6 +356,7 @@ void TopicMonitorBackend::stop_monitoring(const std::string & topic_name) {
     found->second.sample_bytes_sum = 0;
     found->second.has_last_message = false;
     found->second.detail_rows.clear();
+    found->second.plot_samples.clear();
     found->second.detail_error.clear();
   }
   monitored_subscriptions_.erase(
@@ -352,6 +399,7 @@ void TopicMonitorBackend::on_message(
 
   auto & entry = found->second;
   const auto now = TopicClock::now();
+  const auto cutoff = now - kWindowDuration;
   const std::size_t bytes = message.size();
 
   if (entry.has_last_message) {
@@ -367,8 +415,17 @@ void TopicMonitorBackend::on_message(
   entry.sample_bytes_sum += bytes;
   entry.detail_rows = std::move(detail_rows);
   entry.detail_error = std::move(detail_error);
+  for (const auto & row : entry.detail_rows) {
+    if (!row.numeric) {
+      continue;
+    }
+    auto & samples = entry.plot_samples[row.path];
+    samples.push_back({now, row.numeric_value});
+    while (!samples.empty() && samples.front().time < cutoff) {
+      samples.pop_front();
+    }
+  }
 
-  const auto cutoff = now - kWindowDuration;
   while (!entry.samples.empty() && entry.samples.front().time < cutoff) {
     entry.sample_bytes_sum -= entry.samples.front().bytes;
     entry.samples.pop_front();
@@ -410,7 +467,7 @@ std::vector<DetailRow> TopicMonitorBackend::decode_detail_rows(
     introspection.serialization->deserialize_message(&message, storage.data());
     std::vector<DetailRow> rows;
     rows.reserve(introspection.members->member_count_ * 2U);
-    append_message_members(rows, 0, introspection.members, storage.data());
+    append_message_members(rows, 0, "", introspection.members, storage.data());
     introspection.members->fini_function(storage.data());
     return rows;
   } catch (...) {
@@ -420,12 +477,14 @@ std::vector<DetailRow> TopicMonitorBackend::decode_detail_rows(
 }
 
 void TopicMonitorBackend::append_message_members(
-  std::vector<DetailRow> & rows, int depth, const MessageMembers * members, const void * message_memory) const
+  std::vector<DetailRow> & rows, int depth, const std::string & parent_path,
+  const MessageMembers * members, const void * message_memory) const
 {
   for (uint32_t index = 0; index < members->member_count_; ++index) {
     const auto & member = members->members_[index];
     const auto * field_memory = static_cast<const uint8_t *>(message_memory) + member.offset_;
-    append_member(rows, depth, normalize_member_label(*members, member), member, field_memory);
+    append_member(
+      rows, depth, parent_path, normalize_member_label(*members, member), member, field_memory);
   }
 }
 
@@ -442,39 +501,56 @@ std::string TopicMonitorBackend::normalize_member_label(
 }
 
 void TopicMonitorBackend::append_member(
-  std::vector<DetailRow> & rows, int depth, const std::string & label,
+  std::vector<DetailRow> & rows, int depth, const std::string & parent_path, const std::string & label,
   const MessageMember & member, const void * field_memory) const
 {
+  const std::string row_path = parent_path.empty() ? label : (parent_path + "." + label);
   if (member.is_array_) {
     const std::size_t element_count =
       member.size_function != nullptr ? member.size_function(field_memory) : member.array_size_;
-    rows.push_back({depth, label, "[" + std::to_string(element_count) + "]"});
+    rows.push_back({depth, label, "[" + std::to_string(element_count) + "]", row_path});
 
     for (std::size_t index = 0; index < element_count; ++index) {
       const std::string child_label = "[" + std::to_string(index) + "]";
+      const std::string child_path = row_path + child_label;
       if (member.type_id_ == rosidl_typesupport_introspection_cpp::ROS_TYPE_MESSAGE) {
         const auto * sub_members = static_cast<const MessageMembers *>(member.members_->data);
         const void * element_memory =
           member.get_const_function != nullptr ? member.get_const_function(field_memory, index) : nullptr;
         if (element_memory != nullptr) {
-          rows.push_back({depth + 1, child_label, "<message>"});
-          append_message_members(rows, depth + 2, sub_members, element_memory);
+          rows.push_back({depth + 1, child_label, "<message>", child_path});
+          append_message_members(rows, depth + 2, child_path, sub_members, element_memory);
         }
         continue;
       }
-      rows.push_back({depth + 1, child_label, array_element_to_string(member, field_memory, index)});
+      DetailRow row;
+      row.depth = depth + 1;
+      row.field = child_label;
+      row.value = array_element_to_string(member, field_memory, index);
+      row.path = child_path;
+      rows.push_back(std::move(row));
     }
     return;
   }
 
   if (member.type_id_ == rosidl_typesupport_introspection_cpp::ROS_TYPE_MESSAGE) {
-    rows.push_back({depth, label, "<message>"});
+    rows.push_back({depth, label, "<message>", row_path});
     const auto * sub_members = static_cast<const MessageMembers *>(member.members_->data);
-    append_message_members(rows, depth + 1, sub_members, field_memory);
+    append_message_members(rows, depth + 1, row_path, sub_members, field_memory);
     return;
   }
 
-  rows.push_back({depth, label, scalar_field_to_string(member.type_id_, field_memory)});
+  DetailRow row;
+  row.depth = depth;
+  row.field = label;
+  row.value = scalar_field_to_string(member.type_id_, field_memory);
+  row.path = row_path;
+  const auto numeric = scalar_field_to_double(member.type_id_, field_memory);
+  if (numeric.has_value()) {
+    row.numeric = true;
+    row.numeric_value = *numeric;
+  }
+  rows.push_back(std::move(row));
 }
 
 std::string TopicMonitorBackend::array_element_to_string(
@@ -592,6 +668,40 @@ std::string TopicMonitorBackend::scalar_field_to_string(uint8_t type_id, const v
       return "<wstring>";
     default:
       return "<value>";
+  }
+}
+
+std::optional<double> TopicMonitorBackend::scalar_field_to_double(
+  uint8_t type_id, const void * field_memory) const
+{
+  switch (type_id) {
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_BOOLEAN:
+      return *static_cast<const bool *>(field_memory) ? 1.0 : 0.0;
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_OCTET:
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_UINT8:
+      return static_cast<double>(*static_cast<const uint8_t *>(field_memory));
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_INT8:
+      return static_cast<double>(*static_cast<const int8_t *>(field_memory));
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_UINT16:
+      return static_cast<double>(*static_cast<const uint16_t *>(field_memory));
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_INT16:
+      return static_cast<double>(*static_cast<const int16_t *>(field_memory));
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_UINT32:
+      return static_cast<double>(*static_cast<const uint32_t *>(field_memory));
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_INT32:
+      return static_cast<double>(*static_cast<const int32_t *>(field_memory));
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_UINT64:
+      return static_cast<double>(*static_cast<const uint64_t *>(field_memory));
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_INT64:
+      return static_cast<double>(*static_cast<const int64_t *>(field_memory));
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_FLOAT:
+      return static_cast<double>(*static_cast<const float *>(field_memory));
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_DOUBLE:
+      return *static_cast<const double *>(field_memory);
+    case rosidl_typesupport_introspection_cpp::ROS_TYPE_LONG_DOUBLE:
+      return static_cast<double>(*static_cast<const long double *>(field_memory));
+    default:
+      return std::nullopt;
   }
 }
 
@@ -717,6 +827,60 @@ void TopicMonitorBackend::clamp_detail_selection(const std::vector<DetailRow> & 
     return;
   }
   selected_detail_index_ = std::clamp(selected_detail_index_, 0, static_cast<int>(rows.size()) - 1);
+}
+
+void TopicMonitorBackend::clamp_visible_detail_selection() {
+  const auto rows = visible_detail_rows_snapshot(detail_topic_name_);
+  clamp_detail_selection(rows);
+}
+
+void TopicMonitorBackend::expand_selected_detail_row() {
+  const auto visible = visible_detail_rows_snapshot(detail_topic_name_);
+  clamp_detail_selection(visible);
+  if (visible.empty() || selected_detail_index_ < 0 || selected_detail_index_ >= static_cast<int>(visible.size())) {
+    return;
+  }
+  const auto & row = visible[static_cast<std::size_t>(selected_detail_index_)];
+  collapsed_detail_paths_[row.path] = false;
+}
+
+void TopicMonitorBackend::collapse_selected_detail_row() {
+  const auto visible = visible_detail_rows_snapshot(detail_topic_name_);
+  clamp_detail_selection(visible);
+  if (visible.empty() || selected_detail_index_ < 0 || selected_detail_index_ >= static_cast<int>(visible.size())) {
+    return;
+  }
+  const auto & row = visible[static_cast<std::size_t>(selected_detail_index_)];
+  const auto all = detail_rows_snapshot(detail_topic_name_);
+  for (std::size_t index = 0; index < all.size(); ++index) {
+    if (all[index].path != row.path) {
+      continue;
+    }
+    if (detail_row_has_children(all, index)) {
+      collapsed_detail_paths_[row.path] = true;
+      return;
+    }
+    break;
+  }
+}
+
+bool TopicMonitorBackend::selected_detail_row_can_plot() const {
+  const auto row = selected_visible_detail_row();
+  return row.has_value() && row->numeric;
+}
+
+std::optional<DetailRow> TopicMonitorBackend::selected_visible_detail_row() const {
+  const auto visible = visible_detail_rows_snapshot(detail_topic_name_);
+  if (visible.empty() || selected_detail_index_ < 0 || selected_detail_index_ >= static_cast<int>(visible.size())) {
+    return std::nullopt;
+  }
+  return visible[static_cast<std::size_t>(selected_detail_index_)];
+}
+
+bool TopicMonitorBackend::detail_row_has_children(
+  const std::vector<DetailRow> & rows, std::size_t index) const
+{
+  return index + 1 < rows.size() && rows[index + 1].depth > rows[index].depth;
 }
 
 }  // namespace ros2_console_tools

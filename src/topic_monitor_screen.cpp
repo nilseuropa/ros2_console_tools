@@ -40,6 +40,7 @@ using tui::Session;
 using tui::draw_box;
 using tui::draw_box_char;
 using tui::draw_help_bar;
+using tui::draw_help_bar_region;
 using tui::draw_search_box;
 using tui::draw_status_bar;
 using tui::draw_text_vline;
@@ -79,6 +80,20 @@ int TopicMonitorScreen::run() {
 }
 
 bool TopicMonitorScreen::handle_key(int key) {
+  if (plot_popup_open_) {
+    switch (key) {
+      case KEY_F(10):
+        return false;
+      case 27:
+      case '\n':
+      case KEY_ENTER:
+      case KEY_F(3):
+        plot_popup_open_ = false;
+        return true;
+      default:
+        return true;
+    }
+  }
   if (search_state_.active) {
     return handle_search_key(key);
   }
@@ -100,6 +115,9 @@ bool TopicMonitorScreen::handle_topic_list_key(int key) {
       return false;
     case KEY_F(2):
       return launch_selected_visualizer();
+    case KEY_F(3):
+      backend_->status_line_ = "Open a topic detail view to plot numeric fields.";
+      return true;
     case KEY_F(4):
       backend_->refresh_topics();
       return true;
@@ -193,7 +211,7 @@ bool TopicMonitorScreen::handle_search_key(int key) {
 }
 
 bool TopicMonitorScreen::handle_topic_detail_key(int key) {
-  const auto rows = backend_->detail_rows_snapshot(backend_->detail_topic_name_);
+  const auto rows = backend_->visible_detail_rows_snapshot(backend_->detail_topic_name_);
   backend_->clamp_detail_selection(rows);
 
   switch (key) {
@@ -201,6 +219,8 @@ bool TopicMonitorScreen::handle_topic_detail_key(int key) {
       return false;
     case KEY_F(2):
       return launch_selected_visualizer();
+    case KEY_F(3):
+      return launch_selected_plot();
     case 27:
       backend_->close_topic_detail();
       return true;
@@ -227,6 +247,14 @@ bool TopicMonitorScreen::handle_topic_detail_key(int key) {
         backend_->selected_detail_index_ =
           std::min(static_cast<int>(rows.size()) - 1, backend_->selected_detail_index_ + page_step());
       }
+      return true;
+    case KEY_RIGHT:
+    case 'l':
+      backend_->expand_selected_detail_row();
+      return true;
+    case KEY_LEFT:
+    case 'h':
+      backend_->collapse_selected_detail_row();
       return true;
     default:
       return true;
@@ -283,6 +311,30 @@ bool TopicMonitorScreen::launch_selected_visualizer() {
   return true;
 }
 
+bool TopicMonitorScreen::launch_selected_plot() {
+  if (backend_->view_mode_ != TopicMonitorViewMode::TopicDetail) {
+    backend_->status_line_ = "Plotting is available from topic detail view.";
+    return true;
+  }
+
+  const auto selected = backend_->selected_visible_detail_row();
+  if (!selected.has_value()) {
+    backend_->status_line_ = "No field selected.";
+    return true;
+  }
+  if (!selected->numeric) {
+    backend_->status_line_ = "Selected field is not plottable.";
+    return true;
+  }
+
+  plot_topic_name_ = backend_->detail_topic_name_;
+  plot_field_name_ = selected->field;
+  plot_field_path_ = selected->path;
+  plot_popup_open_ = true;
+  backend_->status_line_ = "Plotting " + plot_field_path_ + ".";
+  return true;
+}
+
 void TopicMonitorScreen::draw() {
   erase();
 
@@ -303,6 +355,9 @@ void TopicMonitorScreen::draw() {
   draw_status_line(status_row, columns);
   draw_help_line(help_row, columns);
   draw_search_box(rows, columns, search_state_);
+  if (plot_popup_open_) {
+    draw_plot_popup(rows, columns);
+  }
   refresh();
 }
 
@@ -413,7 +468,8 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
 }
 
 void TopicMonitorScreen::draw_topic_detail(int top, int left, int bottom, int right) {
-  const auto rows = backend_->detail_rows_snapshot(backend_->detail_topic_name_);
+  const auto all_rows = backend_->detail_rows_snapshot(backend_->detail_topic_name_);
+  const auto rows = backend_->visible_detail_rows_snapshot(backend_->detail_topic_name_);
   const auto detail_error = backend_->detail_error_snapshot(backend_->detail_topic_name_);
   backend_->clamp_detail_selection(rows);
 
@@ -453,8 +509,19 @@ void TopicMonitorScreen::draw_topic_detail(int top, int left, int bottom, int ri
     }
 
     const auto & entry = rows[static_cast<std::size_t>(first_row + (row - top - 1))];
+    bool expandable = false;
+    for (std::size_t index = 0; index < all_rows.size(); ++index) {
+      if (all_rows[index].path == entry.path) {
+        expandable = backend_->detail_row_has_children(all_rows, index);
+        break;
+      }
+    }
+    const bool collapsed = expandable &&
+      backend_->collapsed_detail_paths_.find(entry.path) != backend_->collapsed_detail_paths_.end() &&
+      backend_->collapsed_detail_paths_.at(entry.path);
     const std::string indent(static_cast<std::size_t>(entry.depth * 2), ' ');
-    const std::string field_text = indent + entry.field;
+    const std::string marker = expandable ? (collapsed ? "+ " : "- ") : "  ";
+    const std::string field_text = indent + marker + entry.field;
     mvprintw(row, left, "%-*s", field_width, truncate_text(field_text, field_width).c_str());
     mvprintw(row, separator_x + 1, "%-*s", value_width, truncate_text(entry.value, value_width).c_str());
 
@@ -503,9 +570,77 @@ void TopicMonitorScreen::draw_status_line(int row, int columns) const {
 void TopicMonitorScreen::draw_help_line(int row, int columns) const {
   const std::string help =
     backend_->view_mode_ == TopicMonitorViewMode::TopicDetail
-    ? "F2 Visualize  Esc Back  F4 Refresh  F10 Exit"
+    ? "F2 Visualize  F3 Plot  Left/Right Fold  Esc Back  F4 Refresh  F10 Exit"
     : "Enter Inspect  F2 Visualize  Alt+S Search  Space Mark  F4 Refresh  F5 Filter  F10 Exit";
   draw_help_bar(row, columns, help);
+}
+
+void TopicMonitorScreen::draw_plot_popup(int rows, int columns) const {
+  const auto samples = backend_->plot_samples_snapshot(plot_topic_name_, plot_field_path_);
+  const int popup_width = std::min(columns - 6, 96);
+  const int popup_height = std::min(rows - 4, 22);
+  const int left = std::max(2, (columns - popup_width) / 2);
+  const int top = std::max(1, (rows - popup_height) / 2);
+  const int right = left + popup_width - 1;
+  const int bottom = top + popup_height - 1;
+  const int inner_width = popup_width - 2;
+  const int plot_left = left + 2;
+  const int plot_top = top + 3;
+  const int plot_right = right - 2;
+  const int plot_bottom = bottom - 3;
+  const int plot_width = std::max(8, plot_right - plot_left + 1);
+  const int plot_height = std::max(4, plot_bottom - plot_top + 1);
+
+  for (int row = top + 1; row < bottom; ++row) {
+    attron(COLOR_PAIR(tui::kColorPopup));
+    mvhline(row, left + 1, ' ', inner_width);
+    attroff(COLOR_PAIR(tui::kColorPopup));
+  }
+  draw_box(top, left, bottom, right, kColorFrame);
+  attron(theme_attr(kColorHeader));
+  mvprintw(top, left + 2, " Plot: %s ", truncate_text(plot_field_path_, popup_width - 12).c_str());
+  attroff(theme_attr(kColorHeader));
+
+  if (samples.empty()) {
+    mvprintw(top + 2, left + 2, "%s", "Waiting for numeric samples...");
+    draw_help_bar_region(bottom - 1, left + 2, popup_width - 4, "F3 Close  Enter Close  Esc Close  F10 Exit");
+    return;
+  }
+
+  double min_value = samples.front().value;
+  double max_value = samples.front().value;
+  for (const auto & sample : samples) {
+    min_value = std::min(min_value, sample.value);
+    max_value = std::max(max_value, sample.value);
+  }
+  mvprintw(top + 1, left + 2, "%s", truncate_text(plot_topic_name_ + " :: " + plot_field_name_, popup_width - 4).c_str());
+  mvprintw(top + 2, left + 2, "min=%g  max=%g  samples=%zu", min_value, max_value, samples.size());
+
+  for (int row = plot_top; row <= plot_bottom; ++row) {
+    mvhline(row, plot_left, ' ', plot_width);
+  }
+
+  const bool ascii_only = tui::terminal_context() == tui::TerminalContext::Ascii;
+  const bool crosses_zero = min_value < 0.0 && max_value > 0.0;
+  const auto first_time = samples.front().time;
+  const auto last_time = samples.back().time;
+  const double span = std::max(1e-9, std::chrono::duration<double>(last_time - first_time).count());
+  const double display_min = crosses_zero ? min_value : min_value;
+  const double display_max = crosses_zero ? max_value : max_value;
+  const double display_range = std::max(1e-9, display_max - display_min);
+
+  for (const auto & sample : samples) {
+    const double t = samples.size() == 1
+      ? 1.0
+      : std::chrono::duration<double>(sample.time - first_time).count() / span;
+    const int x = std::clamp(static_cast<int>(t * static_cast<double>(plot_width - 1)), 0, plot_width - 1);
+    const double normalized = (sample.value - display_min) / display_range;
+    const int y = plot_bottom - std::clamp(
+      static_cast<int>(normalized * static_cast<double>(plot_height - 1) + 0.5), 0, plot_height - 1);
+    mvaddch(y, plot_left + x, ascii_only ? '.' : ACS_BULLET);
+  }
+
+  draw_help_bar_region(bottom - 1, left + 2, popup_width - 4, "F3 Close  Enter Close  Esc Close  F10 Exit");
 }
 
 }  // namespace ros2_console_tools
