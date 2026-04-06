@@ -558,12 +558,48 @@ void draw_help_bar_region(int row, int left, int width, const std::string & text
   attrset(A_NORMAL);
   mvhline(row, left, ' ', width);
 
+  const auto blocks = parse_help_blocks(text);
   const auto & help_key_color = current_theme()[kColorHelpKey];
   int column = left;
   const int right = left + width;
+  auto block_width = [](const HelpBlock & block) {
+    if (block.label.empty()) {
+      return static_cast<int>(block.key.size());
+    }
+    return static_cast<int>(block.key.size() + 1 + block.label.size() + 1);
+  };
+  auto draw_block = [&](const HelpBlock & block) {
+    const std::string key = block.key;
+    attron(COLOR_PAIR(kColorHelpKey) | help_key_color.attributes);
+    mvaddnstr(row, column, key.c_str(), right - column);
+    attroff(COLOR_PAIR(kColorHelpKey) | help_key_color.attributes);
+    column += static_cast<int>(key.size());
+
+    if (!block.label.empty()) {
+      attron(COLOR_PAIR(kColorHelp));
+      mvaddch(row, column, ' ');
+      attroff(COLOR_PAIR(kColorHelp));
+      ++column;
+
+      const std::string label = block.label;
+      attron(COLOR_PAIR(kColorHelp));
+      mvaddnstr(row, column, label.c_str(), right - column);
+      attroff(COLOR_PAIR(kColorHelp));
+      column += static_cast<int>(label.size());
+
+      attron(COLOR_PAIR(kColorHelp));
+      mvaddch(row, column, ' ');
+      attroff(COLOR_PAIR(kColorHelp));
+      ++column;
+    }
+  };
+
   bool first_block = true;
-  for (const auto & block : parse_help_blocks(text)) {
-    if (column >= right) {
+  std::size_t index = 0;
+  for (; index < blocks.size(); ++index) {
+    const int separator_width = first_block ? 0 : 1;
+    const int needed = separator_width + block_width(blocks[index]);
+    if (column + needed > right) {
       break;
     }
 
@@ -571,53 +607,29 @@ void draw_help_bar_region(int row, int left, int width, const std::string & text
       attrset(A_NORMAL);
       mvaddch(row, column, ' ');
       ++column;
-      if (column >= right) {
-        break;
-      }
     }
 
-    const std::string key = truncate_text(block.key, std::max(0, right - column));
-    if (key.empty()) {
-      continue;
-    }
-
-    attron(COLOR_PAIR(kColorHelpKey) | help_key_color.attributes);
-    mvaddnstr(row, column, key.c_str(), right - column);
-    attroff(COLOR_PAIR(kColorHelpKey) | help_key_color.attributes);
-    column += static_cast<int>(key.size());
-    if (column >= right) {
-      break;
-    }
-
-    if (!block.label.empty()) {
-      const std::string separator = " ";
-      attron(COLOR_PAIR(kColorHelp));
-      mvaddnstr(row, column, separator.c_str(), right - column);
-      attroff(COLOR_PAIR(kColorHelp));
-      column += static_cast<int>(separator.size());
-      if (column >= right) {
-        break;
-      }
-
-      const std::string label = truncate_text(block.label, std::max(0, right - column));
-      attron(COLOR_PAIR(kColorHelp));
-      mvaddnstr(row, column, label.c_str(), right - column);
-      attroff(COLOR_PAIR(kColorHelp));
-      column += static_cast<int>(label.size());
-      if (column >= right) {
-        break;
-      }
-
-      attron(COLOR_PAIR(kColorHelp));
-      mvaddch(row, column, ' ');
-      attroff(COLOR_PAIR(kColorHelp));
-      ++column;
-      if (column >= right) {
-        break;
-      }
-    }
+    draw_block(blocks[index]);
 
     first_block = false;
+  }
+
+  if (index < blocks.size() && column < right) {
+    const int ellipsis_width = first_block ? 3 : 4;
+    if (column + ellipsis_width <= right) {
+      if (!first_block) {
+        attrset(A_NORMAL);
+        mvaddch(row, column, ' ');
+        ++column;
+      }
+      attron(COLOR_PAIR(kColorHelp));
+      mvaddnstr(row, column, "...", right - column);
+      attroff(COLOR_PAIR(kColorHelp));
+    } else if (first_block && width >= 3) {
+      attron(COLOR_PAIR(kColorHelp));
+      mvaddnstr(row, left, "...", width);
+      attroff(COLOR_PAIR(kColorHelp));
+    }
   }
 }
 
