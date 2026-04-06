@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <clocale>
-#include <cstdio>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <deque>
 #include <iomanip>
 #include <map>
@@ -18,13 +20,21 @@
 
 #include <rclcpp/generic_subscription.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/serialization.hpp>
 #include <rclcpp/serialized_message.hpp>
+#include <rclcpp/typesupport_helpers.hpp>
+#include <rcpputils/shared_library.hpp>
+#include <rosidl_runtime_cpp/message_initialization.hpp>
+#include <rosidl_typesupport_introspection_cpp/field_types.hpp>
+#include <rosidl_typesupport_introspection_cpp/message_introspection.hpp>
 
 namespace ros2_console_tools {
 
 namespace {
 
 using Clock = std::chrono::steady_clock;
+using MessageMember = rosidl_typesupport_introspection_cpp::MessageMember;
+using MessageMembers = rosidl_typesupport_introspection_cpp::MessageMembers;
 
 enum ColorPairId {
   kColorFrame = 1,
@@ -37,6 +47,11 @@ enum ColorPairId {
   kColorMonitoredSelection = 8,
   kColorStale = 9,
   kColorStaleSelection = 10,
+};
+
+enum class ViewMode {
+  TopicList,
+  TopicDetail,
 };
 
 class NcursesSession {
@@ -124,6 +139,28 @@ std::string format_bandwidth(double bytes_per_second) {
   return stream.str();
 }
 
+template<typename T>
+std::string scalar_to_string(const T & value) {
+  std::ostringstream stream;
+  stream << value;
+  return stream.str();
+}
+
+template<>
+std::string scalar_to_string<bool>(const bool & value) {
+  return value ? "true" : "false";
+}
+
+template<>
+std::string scalar_to_string<uint8_t>(const uint8_t & value) {
+  return std::to_string(static_cast<unsigned int>(value));
+}
+
+template<>
+std::string scalar_to_string<int8_t>(const int8_t & value) {
+  return std::to_string(static_cast<int>(value));
+}
+
 struct Sample {
   Clock::time_point time;
   std::size_t bytes;
@@ -132,6 +169,20 @@ struct Sample {
 struct IntervalSample {
   Clock::time_point time;
   double seconds;
+};
+
+struct DetailRow {
+  int depth{0};
+  std::string field;
+  std::string value;
+};
+
+struct TopicIntrospection {
+  std::shared_ptr<rcpputils::SharedLibrary> cpp_library;
+  std::shared_ptr<rcpputils::SharedLibrary> introspection_library;
+  const rosidl_message_type_support_t * cpp_typesupport{nullptr};
+  const MessageMembers * members{nullptr};
+  std::unique_ptr<rclcpp::SerializationBase> serialization;
 };
 
 struct TopicEntry {
@@ -144,6 +195,8 @@ struct TopicEntry {
   std::deque<Sample> samples;
   std::deque<IntervalSample> intervals;
   std::size_t sample_bytes_sum{0};
+  std::vector<DetailRow> detail_rows;
+  std::string detail_error;
 };
 
 struct TopicRow {
@@ -185,13 +238,18 @@ private:
   static constexpr auto kStaleAfter = std::chrono::milliseconds(1500);
 
   bool handle_key(int key) {
-    const auto rows = topic_rows_snapshot();
-    if (rows.empty()) {
-      selected_index_ = 0;
-      list_scroll_ = 0;
-    } else {
-      selected_index_ = std::clamp(selected_index_, 0, static_cast<int>(rows.size()) - 1);
+    switch (view_mode_) {
+      case ViewMode::TopicList:
+        return handle_topic_list_key(key);
+      case ViewMode::TopicDetail:
+        return handle_topic_detail_key(key);
     }
+    return true;
+  }
+
+  bool handle_topic_list_key(int key) {
+    const auto rows = topic_rows_snapshot();
+    clamp_topic_selection(rows);
 
     switch (key) {
       case KEY_F(10):
@@ -224,14 +282,56 @@ private:
         return true;
       case KEY_NPAGE:
         if (!rows.empty()) {
-          selected_index_ = std::min(
-            static_cast<int>(rows.size()) - 1,
-            selected_index_ + page_step());
+          selected_index_ = std::min(static_cast<int>(rows.size()) - 1, selected_index_ + page_step());
         }
         return true;
       case ' ':
       case KEY_IC:
         toggle_selected_topic_monitoring();
+        return true;
+      case '\n':
+      case KEY_ENTER:
+        open_selected_topic_detail();
+        return true;
+      default:
+        return true;
+    }
+  }
+
+  bool handle_topic_detail_key(int key) {
+    const auto rows = detail_rows_snapshot(detail_topic_name_);
+    clamp_detail_selection(rows);
+
+    switch (key) {
+      case KEY_F(10):
+        return false;
+      case 27:
+        close_topic_detail();
+        return true;
+      case KEY_F(4):
+        refresh_topics();
+        return true;
+      case KEY_UP:
+      case 'k':
+        if (selected_detail_index_ > 0) {
+          --selected_detail_index_;
+        }
+        return true;
+      case KEY_DOWN:
+      case 'j':
+        if (selected_detail_index_ + 1 < static_cast<int>(rows.size())) {
+          ++selected_detail_index_;
+        }
+        return true;
+      case KEY_PPAGE:
+        selected_detail_index_ = std::max(0, selected_detail_index_ - page_step());
+        return true;
+      case KEY_NPAGE:
+        if (!rows.empty()) {
+          selected_detail_index_ = std::min(
+            static_cast<int>(rows.size()) - 1,
+            selected_detail_index_ + page_step());
+        }
         return true;
       default:
         return true;
@@ -328,6 +428,24 @@ private:
     return rows;
   }
 
+  std::vector<DetailRow> detail_rows_snapshot(const std::string & topic_name) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto found = topics_.find(topic_name);
+    if (found == topics_.end()) {
+      return {};
+    }
+    return found->second.detail_rows;
+  }
+
+  std::string detail_error_snapshot(const std::string & topic_name) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto found = topics_.find(topic_name);
+    if (found == topics_.end()) {
+      return "Topic is no longer available.";
+    }
+    return found->second.detail_error;
+  }
+
   static void compute_stats(
     const TopicEntry & entry,
     std::string & avg_hz,
@@ -364,6 +482,7 @@ private:
 
   void toggle_selected_topic_monitoring() {
     const auto rows = topic_rows_snapshot();
+    clamp_topic_selection(rows);
     if (rows.empty() || selected_index_ < 0 || selected_index_ >= static_cast<int>(rows.size())) {
       status_line_ = "No topic selected.";
       return;
@@ -387,6 +506,51 @@ private:
     }
 
     start_monitoring(snapshot);
+  }
+
+  void open_selected_topic_detail() {
+    const auto rows = topic_rows_snapshot();
+    clamp_topic_selection(rows);
+    if (rows.empty() || selected_index_ < 0 || selected_index_ >= static_cast<int>(rows.size())) {
+      status_line_ = "No topic selected.";
+      return;
+    }
+
+    detail_topic_name_ = rows[static_cast<std::size_t>(selected_index_)].name;
+    detail_scroll_ = 0;
+    selected_detail_index_ = 0;
+    view_mode_ = ViewMode::TopicDetail;
+
+    TopicEntry snapshot;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      const auto found = topics_.find(detail_topic_name_);
+      if (found == topics_.end()) {
+        status_line_ = "Topic disappeared.";
+        view_mode_ = ViewMode::TopicList;
+        detail_topic_name_.clear();
+        return;
+      }
+      snapshot = found->second;
+    }
+
+    if (!snapshot.monitored) {
+      start_monitoring(snapshot);
+    }
+
+    if (snapshot.has_last_message) {
+      status_line_ = "Inspecting " + detail_topic_name_ + ".";
+    } else {
+      status_line_ = "Waiting for data on " + detail_topic_name_ + ".";
+    }
+  }
+
+  void close_topic_detail() {
+    view_mode_ = ViewMode::TopicList;
+    detail_topic_name_.clear();
+    detail_scroll_ = 0;
+    selected_detail_index_ = 0;
+    status_line_ = "Returned to topic list.";
   }
 
   void start_monitoring(const TopicEntry & entry) {
@@ -428,6 +592,8 @@ private:
       found->second.intervals.clear();
       found->second.sample_bytes_sum = 0;
       found->second.has_last_message = false;
+      found->second.detail_rows.clear();
+      found->second.detail_error.clear();
     }
     monitored_subscriptions_.erase(
       std::remove_if(
@@ -439,6 +605,26 @@ private:
   }
 
   void on_message(const std::string & topic_name, const rclcpp::SerializedMessage & message) {
+    std::vector<DetailRow> detail_rows;
+    std::string detail_error;
+    {
+      TopicEntry snapshot;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto found = topics_.find(topic_name);
+        if (found == topics_.end() || !found->second.monitored) {
+          return;
+        }
+        snapshot = found->second;
+      }
+
+      try {
+        detail_rows = decode_detail_rows(snapshot.type, message);
+      } catch (const std::exception & exception) {
+        detail_error = exception.what();
+      }
+    }
+
     std::lock_guard<std::mutex> lock(mutex_);
     auto found = topics_.find(topic_name);
     if (found == topics_.end() || !found->second.monitored) {
@@ -460,6 +646,8 @@ private:
     entry.last_message_time = now;
     entry.samples.push_back({now, bytes});
     entry.sample_bytes_sum += bytes;
+    entry.detail_rows = std::move(detail_rows);
+    entry.detail_error = std::move(detail_error);
 
     const auto cutoff = now - kWindowDuration;
     while (!entry.samples.empty() && entry.samples.front().time < cutoff) {
@@ -468,6 +656,237 @@ private:
     }
     while (!entry.intervals.empty() && entry.intervals.front().time < cutoff) {
       entry.intervals.pop_front();
+    }
+  }
+
+  TopicIntrospection & get_or_create_introspection(const std::string & type) {
+    auto found = introspection_cache_.find(type);
+    if (found != introspection_cache_.end()) {
+      return found->second;
+    }
+
+    TopicIntrospection introspection;
+    introspection.cpp_library = rclcpp::get_typesupport_library(type, "rosidl_typesupport_cpp");
+    introspection.introspection_library = rclcpp::get_typesupport_library(
+      type, "rosidl_typesupport_introspection_cpp");
+    introspection.cpp_typesupport = rclcpp::get_message_typesupport_handle(
+      type, "rosidl_typesupport_cpp", *introspection.cpp_library);
+    const auto * introspection_handle = rclcpp::get_message_typesupport_handle(
+      type, "rosidl_typesupport_introspection_cpp", *introspection.introspection_library);
+    introspection.members = static_cast<const MessageMembers *>(introspection_handle->data);
+    introspection.serialization = std::make_unique<rclcpp::SerializationBase>(introspection.cpp_typesupport);
+
+    auto inserted = introspection_cache_.emplace(type, std::move(introspection));
+    return inserted.first->second;
+  }
+
+  std::vector<DetailRow> decode_detail_rows(
+    const std::string & type,
+    const rclcpp::SerializedMessage & message)
+  {
+    auto & introspection = get_or_create_introspection(type);
+    std::vector<uint8_t> storage(introspection.members->size_of_);
+    introspection.members->init_function(
+      storage.data(), rosidl_runtime_cpp::MessageInitialization::ALL);
+
+    try {
+      introspection.serialization->deserialize_message(&message, storage.data());
+      std::vector<DetailRow> rows;
+      rows.reserve(introspection.members->member_count_ * 2U);
+      append_message_members(rows, 0, introspection.members, storage.data());
+      introspection.members->fini_function(storage.data());
+      return rows;
+    } catch (...) {
+      introspection.members->fini_function(storage.data());
+      throw;
+    }
+  }
+
+  void append_message_members(
+    std::vector<DetailRow> & rows,
+    int depth,
+    const MessageMembers * members,
+    const void * message_memory) const
+  {
+    for (uint32_t index = 0; index < members->member_count_; ++index) {
+      const auto & member = members->members_[index];
+      const auto * field_memory = static_cast<const uint8_t *>(message_memory) + member.offset_;
+      append_member(rows, depth, normalize_member_label(*members, member), member, field_memory);
+    }
+  }
+
+  std::string normalize_member_label(
+    const MessageMembers & parent_members,
+    const MessageMember & member) const
+  {
+    if (std::strcmp(member.name_, "structure_needs_at_least_one_member") != 0) {
+      return member.name_;
+    }
+
+    if (std::strcmp(parent_members.message_name_, "Empty") == 0) {
+      return "empty";
+    }
+
+    return "empty";
+  }
+
+  void append_member(
+    std::vector<DetailRow> & rows,
+    int depth,
+    const std::string & label,
+    const MessageMember & member,
+    const void * field_memory) const
+  {
+    if (member.is_array_) {
+      const std::size_t element_count =
+        member.size_function != nullptr ? member.size_function(field_memory) : member.array_size_;
+      rows.push_back({depth, label, "[" + std::to_string(element_count) + "]"});
+
+      for (std::size_t index = 0; index < element_count; ++index) {
+        const std::string child_label = "[" + std::to_string(index) + "]";
+        if (member.type_id_ == rosidl_typesupport_introspection_cpp::ROS_TYPE_MESSAGE) {
+          const auto * sub_members = static_cast<const MessageMembers *>(member.members_->data);
+          const void * element_memory =
+            member.get_const_function != nullptr ? member.get_const_function(field_memory, index) : nullptr;
+          if (element_memory != nullptr) {
+            rows.push_back({depth + 1, child_label, "<message>"});
+            append_message_members(rows, depth + 2, sub_members, element_memory);
+          }
+          continue;
+        }
+
+        rows.push_back({depth + 1, child_label, array_element_to_string(member, field_memory, index)});
+      }
+      return;
+    }
+
+    if (member.type_id_ == rosidl_typesupport_introspection_cpp::ROS_TYPE_MESSAGE) {
+      rows.push_back({depth, label, "<message>"});
+      const auto * sub_members = static_cast<const MessageMembers *>(member.members_->data);
+      append_message_members(rows, depth + 1, sub_members, field_memory);
+      return;
+    }
+
+    rows.push_back({depth, label, scalar_field_to_string(member.type_id_, field_memory)});
+  }
+
+  std::string array_element_to_string(
+    const MessageMember & member,
+    const void * field_memory,
+    std::size_t index) const
+  {
+    switch (member.type_id_) {
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_BOOLEAN: {
+        bool value{};
+        member.fetch_function(field_memory, index, &value);
+        return scalar_to_string(value);
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_OCTET:
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_UINT8: {
+        uint8_t value{};
+        member.fetch_function(field_memory, index, &value);
+        return scalar_to_string(value);
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_INT8: {
+        int8_t value{};
+        member.fetch_function(field_memory, index, &value);
+        return scalar_to_string(value);
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_UINT16: {
+        uint16_t value{};
+        member.fetch_function(field_memory, index, &value);
+        return scalar_to_string(value);
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_INT16: {
+        int16_t value{};
+        member.fetch_function(field_memory, index, &value);
+        return scalar_to_string(value);
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_UINT32: {
+        uint32_t value{};
+        member.fetch_function(field_memory, index, &value);
+        return scalar_to_string(value);
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_INT32: {
+        int32_t value{};
+        member.fetch_function(field_memory, index, &value);
+        return scalar_to_string(value);
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_UINT64: {
+        uint64_t value{};
+        member.fetch_function(field_memory, index, &value);
+        return scalar_to_string(value);
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_INT64: {
+        int64_t value{};
+        member.fetch_function(field_memory, index, &value);
+        return scalar_to_string(value);
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_FLOAT: {
+        float value{};
+        member.fetch_function(field_memory, index, &value);
+        return scalar_to_string(value);
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_DOUBLE: {
+        double value{};
+        member.fetch_function(field_memory, index, &value);
+        return scalar_to_string(value);
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_LONG_DOUBLE: {
+        long double value{};
+        member.fetch_function(field_memory, index, &value);
+        return scalar_to_string(value);
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_CHAR: {
+        signed char value{};
+        member.fetch_function(field_memory, index, &value);
+        return std::string(1, static_cast<char>(value));
+      }
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_STRING: {
+        std::string value;
+        member.fetch_function(field_memory, index, &value);
+        return value;
+      }
+      default:
+        return "<value>";
+    }
+  }
+
+  std::string scalar_field_to_string(uint8_t type_id, const void * field_memory) const {
+    switch (type_id) {
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_BOOLEAN:
+        return scalar_to_string(*static_cast<const bool *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_OCTET:
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_UINT8:
+        return scalar_to_string(*static_cast<const uint8_t *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_INT8:
+        return scalar_to_string(*static_cast<const int8_t *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_UINT16:
+        return scalar_to_string(*static_cast<const uint16_t *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_INT16:
+        return scalar_to_string(*static_cast<const int16_t *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_UINT32:
+        return scalar_to_string(*static_cast<const uint32_t *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_INT32:
+        return scalar_to_string(*static_cast<const int32_t *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_UINT64:
+        return scalar_to_string(*static_cast<const uint64_t *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_INT64:
+        return scalar_to_string(*static_cast<const int64_t *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_FLOAT:
+        return scalar_to_string(*static_cast<const float *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_DOUBLE:
+        return scalar_to_string(*static_cast<const double *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_LONG_DOUBLE:
+        return scalar_to_string(*static_cast<const long double *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_CHAR:
+        return std::string(1, *static_cast<const char *>(field_memory));
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_STRING:
+        return *static_cast<const std::string *>(field_memory);
+      case rosidl_typesupport_introspection_cpp::ROS_TYPE_WSTRING:
+        return "<wstring>";
+      default:
+        return "<value>";
     }
   }
 
@@ -483,7 +902,11 @@ private:
 
     draw_box(0, 0, content_bottom, columns - 1);
     mvprintw(0, 1, "Topic Monitor ");
-    draw_topic_list(1, 1, content_bottom - 1, columns - 2);
+    if (view_mode_ == ViewMode::TopicList) {
+      draw_topic_list(1, 1, content_bottom - 1, columns - 2);
+    } else {
+      draw_topic_detail(1, 1, content_bottom - 1, columns - 2);
+    }
     draw_status_line(status_row, columns);
     draw_help_line(help_row, columns);
 
@@ -505,12 +928,8 @@ private:
 
   void draw_topic_list(int top, int left, int bottom, int right) {
     const auto rows = topic_rows_snapshot();
-    if (rows.empty()) {
-      selected_index_ = 0;
-      list_scroll_ = 0;
-    } else {
-      selected_index_ = std::clamp(selected_index_, 0, static_cast<int>(rows.size()) - 1);
-    }
+    clamp_topic_selection(rows);
+
     const int visible_rows = std::max(1, bottom - top + 1);
     const int width = right - left + 1;
     const int topic_width = std::max(24, width / 2);
@@ -594,17 +1013,91 @@ private:
     }
   }
 
+  void draw_topic_detail(int top, int left, int bottom, int right) {
+    const auto rows = detail_rows_snapshot(detail_topic_name_);
+    const auto detail_error = detail_error_snapshot(detail_topic_name_);
+    clamp_detail_selection(rows);
+
+    const int width = right - left + 1;
+    const int visible_rows = std::max(1, bottom - top + 1);
+    const int field_width = std::max(24, width / 2);
+    const int value_width = std::max(16, width - field_width - 1);
+    const int separator_x = left + field_width;
+
+    if (selected_detail_index_ < detail_scroll_) {
+      detail_scroll_ = selected_detail_index_;
+    }
+    if (selected_detail_index_ >= detail_scroll_ + visible_rows - 1) {
+      detail_scroll_ = std::max(0, selected_detail_index_ - visible_rows + 2);
+    }
+
+    attron(COLOR_PAIR(kColorHeader));
+    mvprintw(top, left, "%-*s", field_width, "Field");
+    mvaddch(top, separator_x, ACS_VLINE);
+    mvprintw(top, separator_x + 1, "%-*s", value_width, "Value");
+    attroff(COLOR_PAIR(kColorHeader));
+
+    const int first_row = detail_scroll_;
+    const int last_row = std::min(static_cast<int>(rows.size()), first_row + visible_rows - 1);
+    for (int row = top + 1; row <= bottom; ++row) {
+      const bool has_item = first_row + (row - top - 1) < last_row;
+      const bool selected = has_item && (first_row + (row - top - 1) == selected_detail_index_);
+
+      mvhline(row, left, ' ', width);
+      if (selected) {
+        mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      }
+      mvaddch(row, separator_x, selected ? '|' : ACS_VLINE);
+
+      if (!has_item) {
+        continue;
+      }
+
+      const auto & entry = rows[static_cast<std::size_t>(first_row + (row - top - 1))];
+      const std::string indent(static_cast<std::size_t>(entry.depth * 2), ' ');
+      const std::string field_text = indent + entry.field;
+      mvprintw(row, left, "%-*s", field_width, truncate_text(field_text, field_width).c_str());
+      mvprintw(
+        row, separator_x + 1, "%-*s", value_width,
+        truncate_text(entry.value, value_width).c_str());
+
+      if (selected) {
+        mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+        mvaddch(row, separator_x, '|');
+      }
+    }
+
+    if (rows.empty()) {
+      const std::string placeholder = detail_error.empty()
+        ? "Waiting for the first message..."
+        : "Decode error: " + detail_error;
+      mvprintw(top + 1, left + 1, "%s", truncate_text(placeholder, width - 2).c_str());
+    }
+  }
+
   void draw_status_line(int row, int columns) const {
     attron(COLOR_PAIR(kColorStatus));
     mvhline(row, 0, ' ', columns);
-    const auto rows = topic_rows_snapshot();
     std::string line = status_line_;
-    if (!rows.empty() && selected_index_ >= 0 && selected_index_ < static_cast<int>(rows.size())) {
-      const auto & selected = rows[static_cast<std::size_t>(selected_index_)];
-      line = truncate_text(
-        selected.name + " [" + selected.type + "]  " + status_line_,
-        columns - 1);
+
+    if (view_mode_ == ViewMode::TopicDetail && !detail_topic_name_.empty()) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      const auto found = topics_.find(detail_topic_name_);
+      if (found != topics_.end()) {
+        line = truncate_text(
+          detail_topic_name_ + " [" + found->second.type + "]  " + status_line_,
+          columns - 1);
+      }
+    } else {
+      const auto rows = topic_rows_snapshot();
+      if (!rows.empty() && selected_index_ >= 0 && selected_index_ < static_cast<int>(rows.size())) {
+        const auto & selected = rows[static_cast<std::size_t>(selected_index_)];
+        line = truncate_text(
+          selected.name + " [" + selected.type + "]  " + status_line_,
+          columns - 1);
+      }
     }
+
     mvprintw(row, 1, "%s", line.c_str());
     attroff(COLOR_PAIR(kColorStatus));
   }
@@ -612,17 +1105,43 @@ private:
   void draw_help_line(int row, int columns) const {
     attron(COLOR_PAIR(kColorHelp));
     mvhline(row, 0, ' ', columns);
-    const std::string help = "Space/Ins Monitor  F4 Refresh  F5 Filter  F10 Exit";
+    const std::string help =
+      view_mode_ == ViewMode::TopicDetail
+      ? "Enter Details  Esc Topics  F4 Refresh  F10 Exit"
+      : "Enter Details  Space/Ins Monitor  F4 Refresh  F5 Filter  F10 Exit";
     mvprintw(row, 1, "%s", truncate_text(help, columns - 1).c_str());
     attroff(COLOR_PAIR(kColorHelp));
   }
 
+  void clamp_topic_selection(const std::vector<TopicRow> & rows) {
+    if (rows.empty()) {
+      selected_index_ = 0;
+      list_scroll_ = 0;
+      return;
+    }
+    selected_index_ = std::clamp(selected_index_, 0, static_cast<int>(rows.size()) - 1);
+  }
+
+  void clamp_detail_selection(const std::vector<DetailRow> & rows) {
+    if (rows.empty()) {
+      selected_detail_index_ = 0;
+      detail_scroll_ = 0;
+      return;
+    }
+    selected_detail_index_ = std::clamp(selected_detail_index_, 0, static_cast<int>(rows.size()) - 1);
+  }
+
   mutable std::mutex mutex_;
   std::map<std::string, TopicEntry> topics_;
+  std::map<std::string, TopicIntrospection> introspection_cache_;
   std::vector<std::pair<std::string, rclcpp::GenericSubscription::SharedPtr>> monitored_subscriptions_;
+  ViewMode view_mode_{ViewMode::TopicList};
   int selected_index_{0};
   int list_scroll_{0};
+  int selected_detail_index_{0};
+  int detail_scroll_{0};
   bool show_only_monitored_{false};
+  std::string detail_topic_name_;
   std::string status_line_{"Loading topics..."};
   Clock::time_point last_refresh_time_{};
 };

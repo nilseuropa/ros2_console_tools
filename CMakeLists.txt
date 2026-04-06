@@ -15,6 +15,7 @@ find_package(ament_cmake REQUIRED)
 find_package(Curses REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rosidl_typesupport_introspection_cpp REQUIRED)
 
 add_executable(occupancy_grid_node src/occupancy_grid_node.cpp)
 ament_target_dependencies(occupancy_grid_node
@@ -40,6 +41,7 @@ install(TARGETS parameter_commander
 add_executable(topic_monitor src/topic_monitor.cpp)
 ament_target_dependencies(topic_monitor
   rclcpp
+  rosidl_typesupport_introspection_cpp
 )
 target_include_directories(topic_monitor PRIVATE ${CURSES_INCLUDE_DIR})
 target_link_libraries(topic_monitor ${CURSES_LIBRARIES})
