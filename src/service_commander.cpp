@@ -2,12 +2,9 @@
 
 #include <algorithm>
 #include <chrono>
-#include <clocale>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <cwchar>
-#include <langinfo.h>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -26,6 +23,8 @@
 #include <rosidl_typesupport_introspection_cpp/message_introspection.hpp>
 #include <rosidl_typesupport_introspection_cpp/service_introspection.hpp>
 
+#include "ros2_console_tools/tui.hpp"
+
 namespace ros2_console_tools {
 
 namespace {
@@ -35,12 +34,12 @@ using MessageMembers = rosidl_typesupport_introspection_cpp::MessageMembers;
 using ServiceMembers = rosidl_typesupport_introspection_cpp::ServiceMembers;
 
 enum ColorPairId {
-  kColorFrame = 1,
-  kColorTitle = 2,
-  kColorHeader = 3,
-  kColorSelection = 4,
-  kColorStatus = 5,
-  kColorHelp = 6,
+  kColorFrame = tui::kColorFrame,
+  kColorTitle = tui::kColorTitle,
+  kColorHeader = tui::kColorHeader,
+  kColorSelection = tui::kColorSelection,
+  kColorStatus = tui::kColorStatus,
+  kColorHelp = tui::kColorHelp,
 };
 
 enum class ViewMode {
@@ -48,71 +47,11 @@ enum class ViewMode {
   ServiceDetail,
 };
 
-class NcursesSession {
-public:
-  NcursesSession() {
-    std::setlocale(LC_ALL, "");
-    initscr();
-    cbreak();
-    noecho();
-    keypad(stdscr, TRUE);
-    curs_set(0);
-    timeout(100);
-    if (has_colors()) {
-      start_color();
-      use_default_colors();
-      init_pair(kColorFrame, COLOR_CYAN, -1);
-      init_pair(kColorTitle, COLOR_WHITE, -1);
-      init_pair(kColorHeader, COLOR_YELLOW, -1);
-      init_pair(kColorSelection, COLOR_BLACK, COLOR_YELLOW);
-      init_pair(kColorStatus, COLOR_GREEN, -1);
-      init_pair(kColorHelp, COLOR_BLACK, COLOR_CYAN);
-    }
-  }
-
-  ~NcursesSession() {
-    curs_set(1);
-    endwin();
-  }
-};
-
-std::string truncate_text(const std::string & text, int width) {
-  if (width <= 0) {
-    return "";
-  }
-  if (static_cast<int>(text.size()) <= width) {
-    return text;
-  }
-  if (width <= 3) {
-    return text.substr(0, static_cast<std::size_t>(width));
-  }
-  return text.substr(0, static_cast<std::size_t>(width - 3)) + "...";
-}
-
-bool use_unicode_line_drawing() {
-  const char * codeset = nl_langinfo(CODESET);
-  return codeset != nullptr && std::string(codeset).find("UTF-8") != std::string::npos;
-}
-
-void draw_box_char(int row, int col, const cchar_t * wide_char, char ascii_char) {
-  if (use_unicode_line_drawing()) {
-    mvadd_wch(row, col, wide_char);
-  } else {
-    mvaddch(row, col, ascii_char);
-  }
-}
-
-void draw_text_hline(int row, int col, int count) {
-  for (int index = 0; index < count; ++index) {
-    draw_box_char(row, col + index, WACS_HLINE, '-');
-  }
-}
-
-void draw_text_vline(int row, int col, int count) {
-  for (int index = 0; index < count; ++index) {
-    draw_box_char(row + index, col, WACS_VLINE, '|');
-  }
-}
+using tui::Session;
+using tui::truncate_text;
+using tui::draw_box;
+using tui::draw_box_char;
+using tui::draw_text_vline;
 
 template<typename T>
 std::string scalar_to_string(const T & value) {
@@ -161,7 +100,7 @@ public:
   : Node("service_commander") {}
 
   int run() {
-    NcursesSession ncurses_session;
+    Session ncurses_session;
     refresh_services();
 
     bool running = true;
@@ -590,7 +529,7 @@ private:
     const int status_row = rows - 2;
     const int content_bottom = std::max(1, status_row - 1);
 
-    draw_box(0, 0, content_bottom, columns - 1);
+    draw_box(0, 0, content_bottom, columns - 1, kColorFrame);
     mvprintw(0, 1, "Service Commander ");
     if (view_mode_ == ViewMode::ServiceList) {
       draw_service_list(1, 1, content_bottom - 1, columns - 2);
@@ -600,19 +539,6 @@ private:
     draw_status_line(status_row, columns);
     draw_help_line(help_row, columns);
     refresh();
-  }
-
-  void draw_box(int top, int left, int bottom, int right) const {
-    attron(COLOR_PAIR(kColorFrame));
-    draw_box_char(top, left, WACS_ULCORNER, '+');
-    draw_box_char(top, right, WACS_URCORNER, '+');
-    draw_box_char(bottom, left, WACS_LLCORNER, '+');
-    draw_box_char(bottom, right, WACS_LRCORNER, '+');
-    draw_text_hline(top, left + 1, right - left - 1);
-    draw_text_hline(bottom, left + 1, right - left - 1);
-    draw_text_vline(top + 1, left, bottom - top - 1);
-    draw_text_vline(top + 1, right, bottom - top - 1);
-    attroff(COLOR_PAIR(kColorFrame));
   }
 
   void draw_service_list(int top, int left, int bottom, int right) {

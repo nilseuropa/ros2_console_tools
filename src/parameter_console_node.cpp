@@ -3,10 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
-#include <clocale>
 #include <cstdlib>
-#include <cwchar>
-#include <langinfo.h>
 #include <memory>
 #include <limits>
 #include <map>
@@ -21,6 +18,8 @@
 #include <rcl_interfaces/msg/parameter_type.hpp>
 #include <rclcpp/parameter_client.hpp>
 #include <rclcpp/rclcpp.hpp>
+
+#include "ros2_console_tools/tui.hpp"
 
 namespace ros2_console_tools {
 
@@ -102,30 +101,11 @@ int visible_width(const std::string & line) {
   return width;
 }
 
-bool use_unicode_line_drawing() {
-  const char * codeset = nl_langinfo(CODESET);
-  return codeset != nullptr && std::string(codeset).find("UTF-8") != std::string::npos;
-}
-
-void draw_box_char(int row, int col, const cchar_t * wide_char, char ascii_char) {
-  if (use_unicode_line_drawing()) {
-    mvadd_wch(row, col, wide_char);
-  } else {
-    mvaddch(row, col, ascii_char);
-  }
-}
-
-void draw_text_hline(int row, int col, int count) {
-  for (int index = 0; index < count; ++index) {
-    draw_box_char(row, col + index, WACS_HLINE, '-');
-  }
-}
-
-void draw_text_vline(int row, int col, int count) {
-  for (int index = 0; index < count; ++index) {
-    draw_box_char(row + index, col, WACS_VLINE, '|');
-  }
-}
+using tui::Session;
+using tui::draw_box;
+using tui::draw_box_char;
+using tui::draw_text_hline;
+using tui::draw_text_vline;
 
 std::string truncate_line(const std::string & line, int max_columns) {
   if (max_columns <= 0) {
@@ -184,16 +164,16 @@ bool is_scalar_type(uint8_t type) {
 }
 
 enum ColorPairId {
-  kColorFrame = 1,
-  kColorTitle = 2,
-  kColorHeader = 3,
-  kColorSelection = 4,
-  kColorStatus = 5,
-  kColorHelp = 6,
-  kColorPopup = 7,
-  kColorInput = 8,
-  kColorDirty = 9,
-  kColorCursor = 10,
+  kColorFrame = tui::kColorFrame,
+  kColorTitle = tui::kColorTitle,
+  kColorHeader = tui::kColorHeader,
+  kColorSelection = tui::kColorSelection,
+  kColorStatus = tui::kColorStatus,
+  kColorHelp = tui::kColorHelp,
+  kColorPopup = tui::kColorPopup,
+  kColorInput = tui::kColorInput,
+  kColorDirty = tui::kColorDirty,
+  kColorCursor = tui::kColorCursor,
 };
 
 bool software_caret_visible() {
@@ -268,7 +248,7 @@ public:
   }
 
   int run() {
-    NcursesSession ncurses_session;
+    Session ncurses_session;
     refresh_node_list();
     if (current_view_ == ViewMode::NodeList) {
       warm_up_node_list();
@@ -961,7 +941,7 @@ private:
     const int status_row = rows - 2;
     const int content_top = 0;
     const int content_bottom = std::max(content_top + 1, status_row - 1);
-    draw_box(0, 0, content_bottom, columns - 1);
+    draw_box(0, 0, content_bottom, columns - 1, kColorFrame);
     mvprintw(0, 1, "Parameter Commander ");
     if (current_view_ == ViewMode::NodeList) {
       draw_node_list(1, 1, content_bottom - 1, columns - 2);
@@ -975,19 +955,6 @@ private:
     }
 
     refresh();
-  }
-
-  void draw_box(int top, int left, int bottom, int right) const {
-    attron(COLOR_PAIR(kColorFrame));
-    draw_box_char(top, left, WACS_ULCORNER, '+');
-    draw_box_char(top, right, WACS_URCORNER, '+');
-    draw_box_char(bottom, left, WACS_LLCORNER, '+');
-    draw_box_char(bottom, right, WACS_LRCORNER, '+');
-    draw_text_hline(top, left + 1, right - left - 1);
-    draw_text_hline(bottom, left + 1, right - left - 1);
-    draw_text_vline(top + 1, left, bottom - top - 1);
-    draw_text_vline(top + 1, right, bottom - top - 1);
-    attroff(COLOR_PAIR(kColorFrame));
   }
 
   void draw_parameter_list(int top, int left, int bottom, int right) {
@@ -1283,7 +1250,7 @@ private:
       draw_text_vline(top + 1, right, bottom - top - 1);
       attroff(COLOR_PAIR(kColorDirty));
     } else {
-      draw_box(top, left, bottom, right);
+      draw_box(top, left, bottom, right, kColorFrame);
     }
     attron(COLOR_PAIR(kColorTitle) | A_BOLD);
     mvprintw(top, left + 2, " Edit Parameter ");
@@ -1319,7 +1286,7 @@ private:
     draw_popup_field(top + 4, "current", summary_value(*entry));
     draw_text_hline(top + 5, left + 1, inner_width);
     attroff(COLOR_PAIR(kColorPopup));
-    draw_box(field_top, field_left, field_top + 2, field_right);
+    draw_box(field_top, field_left, field_top + 2, field_right, kColorFrame);
     attron(COLOR_PAIR(kColorHeader) | A_BOLD);
     mvhline(field_top + 1, field_left + 1, ' ', field_inner_width);
     const std::string visible_buffer = tail_fit(popup_buffer_, edit_text_width);

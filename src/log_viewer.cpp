@@ -2,12 +2,9 @@
 
 #include <algorithm>
 #include <chrono>
-#include <clocale>
 #include <cstdint>
-#include <cwchar>
 #include <deque>
 #include <iomanip>
-#include <langinfo.h>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -21,6 +18,8 @@
 #include <rcl_interfaces/msg/log.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include "ros2_console_tools/tui.hpp"
+
 namespace ros2_console_tools {
 
 namespace {
@@ -29,17 +28,17 @@ using Clock = std::chrono::steady_clock;
 using LogMessage = rcl_interfaces::msg::Log;
 
 enum ColorPairId {
-  kColorFrame = 1,
-  kColorTitle = 2,
-  kColorHeader = 3,
-  kColorSelection = 4,
-  kColorStatus = 5,
-  kColorHelp = 6,
-  kColorWarn = 7,
-  kColorError = 8,
-  kColorFatal = 9,
-  kColorSource = 10,
-  kColorPopup = 11,
+  kColorFrame = tui::kColorFrame,
+  kColorTitle = tui::kColorTitle,
+  kColorHeader = tui::kColorHeader,
+  kColorSelection = tui::kColorSelection,
+  kColorStatus = tui::kColorStatus,
+  kColorHelp = tui::kColorHelp,
+  kColorWarn = tui::kColorWarn,
+  kColorError = tui::kColorError,
+  kColorFatal = tui::kColorFatal,
+  kColorSource = tui::kColorAccent,
+  kColorPopup = tui::kColorPopup,
 };
 
 enum class PaneFocus {
@@ -52,76 +51,11 @@ enum class ViewMode {
   SourceLive,
 };
 
-class NcursesSession {
-public:
-  NcursesSession() {
-    std::setlocale(LC_ALL, "");
-    initscr();
-    cbreak();
-    noecho();
-    keypad(stdscr, TRUE);
-    curs_set(0);
-    timeout(100);
-    if (has_colors()) {
-      start_color();
-      use_default_colors();
-      init_pair(kColorFrame, COLOR_CYAN, -1);
-      init_pair(kColorTitle, COLOR_WHITE, -1);
-      init_pair(kColorHeader, COLOR_YELLOW, -1);
-      init_pair(kColorSelection, COLOR_BLACK, COLOR_YELLOW);
-      init_pair(kColorStatus, COLOR_GREEN, -1);
-      init_pair(kColorHelp, COLOR_BLACK, COLOR_CYAN);
-      init_pair(kColorWarn, COLOR_YELLOW, -1);
-      init_pair(kColorError, COLOR_RED, -1);
-      init_pair(kColorFatal, COLOR_RED, COLOR_YELLOW);
-      init_pair(kColorSource, COLOR_CYAN, -1);
-      init_pair(kColorPopup, COLOR_WHITE, -1);
-    }
-  }
-
-  ~NcursesSession() {
-    curs_set(1);
-    endwin();
-  }
-};
-
-std::string truncate_text(const std::string & text, int width) {
-  if (width <= 0) {
-    return "";
-  }
-  if (static_cast<int>(text.size()) <= width) {
-    return text;
-  }
-  if (width <= 3) {
-    return text.substr(0, static_cast<std::size_t>(width));
-  }
-  return text.substr(0, static_cast<std::size_t>(width - 3)) + "...";
-}
-
-bool use_unicode_line_drawing() {
-  const char * codeset = nl_langinfo(CODESET);
-  return codeset != nullptr && std::string(codeset).find("UTF-8") != std::string::npos;
-}
-
-void draw_box_char(int row, int col, const cchar_t * wide_char, char ascii_char) {
-  if (use_unicode_line_drawing()) {
-    mvadd_wch(row, col, wide_char);
-  } else {
-    mvaddch(row, col, ascii_char);
-  }
-}
-
-void draw_text_hline(int row, int col, int count) {
-  for (int index = 0; index < count; ++index) {
-    draw_box_char(row, col + index, WACS_HLINE, '-');
-  }
-}
-
-void draw_text_vline(int row, int col, int count) {
-  for (int index = 0; index < count; ++index) {
-    draw_box_char(row + index, col, WACS_VLINE, '|');
-  }
-}
+using tui::Session;
+using tui::truncate_text;
+using tui::draw_box;
+using tui::draw_box_char;
+using tui::draw_text_vline;
 
 std::string time_string(const builtin_interfaces::msg::Time & stamp) {
   std::ostringstream stream;
@@ -182,7 +116,7 @@ public:
   : Node("log_viewer") {}
 
   int run() {
-    NcursesSession ncurses_session;
+    Session ncurses_session;
     refresh_sources();
 
     bool running = true;
@@ -616,7 +550,7 @@ private:
     const int status_row = rows - 2;
     const int content_bottom = std::max(1, status_row - 1);
 
-    draw_box(0, 0, content_bottom, columns - 1);
+    draw_box(0, 0, content_bottom, columns - 1, kColorFrame);
     mvprintw(0, 1, "Log Viewer ");
     if (view_mode_ == ViewMode::Split) {
       const int left_width = std::max(24, (columns - 2) / 4);
@@ -636,19 +570,6 @@ private:
     }
 
     refresh();
-  }
-
-  void draw_box(int top, int left, int bottom, int right) const {
-    attron(COLOR_PAIR(kColorFrame));
-    draw_box_char(top, left, WACS_ULCORNER, '+');
-    draw_box_char(top, right, WACS_URCORNER, '+');
-    draw_box_char(bottom, left, WACS_LLCORNER, '+');
-    draw_box_char(bottom, right, WACS_LRCORNER, '+');
-    draw_text_hline(top, left + 1, right - left - 1);
-    draw_text_hline(bottom, left + 1, right - left - 1);
-    draw_text_vline(top + 1, left, bottom - top - 1);
-    draw_text_vline(top + 1, right, bottom - top - 1);
-    attroff(COLOR_PAIR(kColorFrame));
   }
 
   void draw_sources_pane(int top, int left, int bottom, int right) {
@@ -858,7 +779,7 @@ private:
       mvhline(row, left, ' ', popup_width);
       mvchgat(row, left, popup_width, A_NORMAL, kColorPopup, nullptr);
     }
-    draw_box(top, left, bottom, right);
+    draw_box(top, left, bottom, right, kColorFrame);
 
     const auto print_line = [&](int row, const std::string & label, const std::string & value) {
       const std::string text = label + value;
