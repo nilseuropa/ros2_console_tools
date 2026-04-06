@@ -364,6 +364,10 @@ private:
     const std::string frame = rows_[static_cast<std::size_t>(selected_index_)].child_frame;
     auto found = std::find(selected_frames_.begin(), selected_frames_.end(), frame);
     if (found == selected_frames_.end()) {
+      if (selected_frames_.size() >= 2) {
+        set_status("TF inspect supports exactly two selected frames.");
+        return;
+      }
       selected_frames_.push_back(frame);
       set_status("Selected " + frame + ".");
     } else {
