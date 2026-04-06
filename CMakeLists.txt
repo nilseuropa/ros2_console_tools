@@ -63,4 +63,16 @@ install(TARGETS log_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_executable(service_commander src/service_commander.cpp)
+ament_target_dependencies(service_commander
+  rclcpp
+  rosidl_typesupport_introspection_cpp
+)
+target_include_directories(service_commander PRIVATE ${CURSES_INCLUDE_DIR})
+target_link_libraries(service_commander ${CURSES_LIBRARIES})
+
+install(TARGETS service_commander
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
