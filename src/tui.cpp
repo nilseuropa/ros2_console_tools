@@ -186,6 +186,36 @@ void initialize_theme() {
   }
 }
 
+void install_function_key_sequences() {
+  struct Binding {
+    const char * sequence;
+    int keycode;
+  };
+
+  static const Binding bindings[] = {
+    {"\x1bOP", KEY_F(1)},
+    {"\x1bOQ", KEY_F(2)},
+    {"\x1bOR", KEY_F(3)},
+    {"\x1bOS", KEY_F(4)},
+    {"\x1b[11~", KEY_F(1)},
+    {"\x1b[12~", KEY_F(2)},
+    {"\x1b[13~", KEY_F(3)},
+    {"\x1b[14~", KEY_F(4)},
+    {"\x1b[15~", KEY_F(5)},
+    {"\x1b[17~", KEY_F(6)},
+    {"\x1b[18~", KEY_F(7)},
+    {"\x1b[19~", KEY_F(8)},
+    {"\x1b[20~", KEY_F(9)},
+    {"\x1b[21~", KEY_F(10)},
+    {"\x1b[23~", KEY_F(11)},
+    {"\x1b[24~", KEY_F(12)},
+  };
+
+  for (const auto & binding : bindings) {
+    define_key(binding.sequence, binding.keycode);
+  }
+}
+
 }  // namespace
 
 Theme make_default_theme() {
@@ -343,6 +373,7 @@ Session::Session() {
   cbreak();
   noecho();
   keypad(stdscr, TRUE);
+  install_function_key_sequences();
   curs_set(0);
   timeout(100);
   initialize_theme();
