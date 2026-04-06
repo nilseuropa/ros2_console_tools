@@ -91,16 +91,27 @@ install(TARGETS log_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_library(service_commander_lib
+  src/service_commander_backend.cpp
+  src/service_commander_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(service_commander_lib
+  rclcpp
+  rosidl_typesupport_introspection_cpp
+)
+target_include_directories(service_commander_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(service_commander_lib ${NCURSESW_LIBRARY})
+
 add_executable(service_commander src/service_commander.cpp)
-target_sources(service_commander PRIVATE src/tui.cpp)
 ament_target_dependencies(service_commander
   rclcpp
   rosidl_typesupport_introspection_cpp
 )
 target_include_directories(service_commander PRIVATE ${CURSES_INCLUDE_DIR} include)
-target_link_libraries(service_commander ${NCURSESW_LIBRARY})
+target_link_libraries(service_commander service_commander_lib)
 
-install(TARGETS service_commander
+install(TARGETS service_commander_lib service_commander
   DESTINATION lib/${PROJECT_NAME}
 )
 
