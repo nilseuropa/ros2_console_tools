@@ -15,6 +15,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -55,6 +56,15 @@ struct DetailRow {
   std::string value;
 };
 
+struct RequestRow {
+  int depth{0};
+  std::string field;
+  std::string value;
+  bool editable{false};
+  uint8_t type_id{0};
+  void * field_memory{nullptr};
+};
+
 struct ServiceEntry {
   std::string name;
   std::string type;
@@ -87,18 +97,30 @@ private:
   void open_selected_service();
   void close_service_detail();
   ServiceIntrospection & get_or_create_introspection(const std::string & type);
+  void finalize_request_storage();
   void reload_selected_service_request();
   void call_selected_service();
+  RequestRow * selected_request_row();
+  const RequestRow * selected_request_row() const;
+  bool request_row_is_editable(const RequestRow & row) const;
+  bool set_selected_request_value(const std::string & value_text);
   std::vector<DetailRow> flatten_message(const MessageMembers * members, const void * message_memory) const;
+  std::vector<RequestRow> flatten_request_message(const MessageMembers * members, void * message_memory) const;
   void append_message_members(
     std::vector<DetailRow> & rows, int depth, const MessageMembers * members, const void * message_memory) const;
+  void append_request_members(
+    std::vector<RequestRow> & rows, int depth, const MessageMembers * members, void * message_memory) const;
   std::string normalize_member_label(const MessageMembers & parent_members, const MessageMember & member) const;
   void append_member(
     std::vector<DetailRow> & rows, int depth, const std::string & label,
     const MessageMember & member, const void * field_memory) const;
+  void append_request_member(
+    std::vector<RequestRow> & rows, int depth, const std::string & label,
+    const MessageMember & member, void * field_memory) const;
   std::string array_element_to_string(
     const MessageMember & member, const void * field_memory, std::size_t index) const;
   std::string scalar_field_to_string(uint8_t type_id, const void * field_memory) const;
+  std::optional<bool> parse_bool_text(const std::string & value_text) const;
 
   std::vector<ServiceEntry> services_;
   std::map<std::string, ServiceIntrospection> introspection_cache_;
@@ -106,10 +128,13 @@ private:
   int selected_service_index_{0};
   int service_scroll_{0};
   ServiceEntry selected_service_;
-  std::vector<DetailRow> request_rows_;
+  std::vector<uint8_t> request_storage_;
+  std::vector<RequestRow> request_rows_;
   std::vector<DetailRow> response_rows_;
   std::string response_error_;
   std::string status_line_{"Loading services..."};
+  int selected_request_index_{0};
+  int request_scroll_{0};
 };
 
 class ServiceCommanderScreen {
@@ -122,20 +147,21 @@ private:
   bool handle_service_list_key(int key);
   bool handle_search_key(int key);
   bool handle_service_detail_key(int key);
+  bool handle_edit_popup_key(int key);
   int page_step() const;
   void draw();
   void draw_service_list(int top, int left, int bottom, int right);
-  void draw_rows_panel(
-    int top, int left, int bottom, int right,
-    const std::string & title,
-    const std::vector<DetailRow> & rows,
-    const std::string & error) const;
+  void draw_response_panel(int top, int left, int bottom, int right) const;
   void draw_service_detail(int top, int left, int bottom, int right) const;
+  void draw_edit_popup(int rows, int columns) const;
   void draw_status_line(int row, int columns) const;
   void draw_help_line(int row, int columns) const;
 
   std::shared_ptr<ServiceCommanderBackend> backend_;
   tui::SearchState search_state_;
+  bool edit_popup_open_{false};
+  bool edit_popup_dirty_{false};
+  std::string edit_popup_buffer_;
 };
 
 }  // namespace ros2_console_tools
