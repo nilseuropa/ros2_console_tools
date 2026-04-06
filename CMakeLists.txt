@@ -78,16 +78,27 @@ install(TARGETS topic_monitor_lib topic_monitor
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_library(log_viewer_lib
+  src/log_viewer_backend.cpp
+  src/log_viewer_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(log_viewer_lib
+  rcl_interfaces
+  rclcpp
+)
+target_include_directories(log_viewer_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(log_viewer_lib ${NCURSESW_LIBRARY})
+
 add_executable(log_viewer src/log_viewer.cpp)
-target_sources(log_viewer PRIVATE src/tui.cpp)
 ament_target_dependencies(log_viewer
   rcl_interfaces
   rclcpp
 )
 target_include_directories(log_viewer PRIVATE ${CURSES_INCLUDE_DIR} include)
-target_link_libraries(log_viewer ${NCURSESW_LIBRARY})
+target_link_libraries(log_viewer log_viewer_lib)
 
-install(TARGETS log_viewer
+install(TARGETS log_viewer_lib log_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 
