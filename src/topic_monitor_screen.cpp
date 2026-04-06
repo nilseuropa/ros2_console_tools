@@ -276,15 +276,8 @@ bool TopicMonitorScreen::launch_selected_visualizer() {
   }
 
   if (topic_type == "nav_msgs/msg/OccupancyGrid") {
-    def_prog_mode();
-    endwin();
-    (void)run_map_viewer_tool(topic_name);
-    reset_prog_mode();
-    refresh();
-    clear();
-    clearok(stdscr, TRUE);
-    curs_set(0);
-    timeout(100);
+    flushinp();
+    (void)run_map_viewer_tool(topic_name, true);
     backend_->status_line_ = "Returned from map_viewer for " + topic_name + ".";
     return true;
   }

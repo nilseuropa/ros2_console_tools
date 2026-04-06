@@ -13,7 +13,7 @@
 
 namespace ros2_console_tools {
 
-int run_map_viewer_tool(const std::string & topic = "");
+int run_map_viewer_tool(const std::string & topic = "", bool embedded_mode = false);
 
 class MapViewerScreen;
 
@@ -36,7 +36,6 @@ private:
   int rotation_degrees_{90};
   bool show_free_{true};
   bool show_legend_{true};
-  bool monochrome_{false};
   mutable std::mutex latest_grid_mutex_;
   OccupancyGrid::ConstSharedPtr latest_grid_;
   rclcpp::Subscription<OccupancyGrid>::SharedPtr subscription_;
@@ -44,7 +43,7 @@ private:
 
 class MapViewerScreen {
 public:
-  explicit MapViewerScreen(std::shared_ptr<MapViewerBackend> backend);
+  explicit MapViewerScreen(std::shared_ptr<MapViewerBackend> backend, bool embedded_mode = false);
   int run();
 
 private:
@@ -59,6 +58,8 @@ private:
   void draw_help_line(int row, int columns) const;
 
   std::shared_ptr<MapViewerBackend> backend_;
+  bool embedded_mode_{false};
+  std::chrono::steady_clock::time_point startup_time_{};
 };
 
 }  // namespace ros2_console_tools

@@ -22,7 +22,6 @@ MapViewerBackend::MapViewerBackend(const std::string & topic)
   max_height_ = std::max(0, static_cast<int>(this->declare_parameter("max_height", 0)));
   show_free_ = this->declare_parameter<bool>("show_free", true);
   show_legend_ = this->declare_parameter<bool>("show_legend", true);
-  monochrome_ = this->declare_parameter<bool>("monochrome", false);
   rotation_degrees_ = this->declare_parameter<int>("rotation", 90);
   if (rotation_degrees_ != 90 && rotation_degrees_ != 180 && rotation_degrees_ != 270) {
     RCLCPP_WARN(

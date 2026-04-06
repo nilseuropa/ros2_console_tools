@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <iomanip>
+#include <memory>
 #include <sstream>
 #include <thread>
 #include <utility>
@@ -60,6 +61,7 @@ using tui::Session;
 using tui::draw_box;
 using tui::draw_help_bar;
 using tui::draw_status_bar;
+using tui::terminal_context;
 using tui::theme_attr;
 using tui::truncate_text;
 
@@ -114,7 +116,24 @@ CostBucket cost_bucket(int8_t occupancy_value) {
   return CostBucket::Lethal;
 }
 
-const char * bucket_glyph(CostBucket bucket) {
+const char * bucket_glyph(CostBucket bucket, tui::TerminalContext context) {
+  if (context == tui::TerminalContext::Ascii) {
+    switch (bucket) {
+      case CostBucket::Free:
+        return ".";
+      case CostBucket::Low:
+        return ":";
+      case CostBucket::Medium:
+        return "=";
+      case CostBucket::High:
+        return "#";
+      case CostBucket::Lethal:
+        return "@";
+      case CostBucket::Unknown:
+      default:
+        return "?";
+    }
+  }
   switch (bucket) {
     case CostBucket::Free:
       return "·";
@@ -164,6 +183,11 @@ std::string format_age(const builtin_interfaces::msg::Time & stamp, const rclcpp
   return stream.str();
 }
 
+tui::TerminalContext render_context() {
+  const auto context = terminal_context();
+  return context;
+}
+
 RenderGeometry compute_render_geometry(
   int rows,
   int columns,
@@ -176,13 +200,13 @@ RenderGeometry compute_render_geometry(
   int rotation_degrees,
   int max_width,
   int max_height,
-  bool monochrome)
+  tui::TerminalContext context)
 {
   (void)rows;
   (void)columns;
   const auto [rotated_width, rotated_height] =
     rotated_dimensions(source_width, source_height, rotation_degrees);
-  const int cell_width = monochrome ? kAsciiCellWidth : kColorCellWidth;
+  const int cell_width = context == tui::TerminalContext::Ascii ? kAsciiCellWidth : kColorCellWidth;
   const int available_columns = std::max(cell_width, right - left - 1);
   const int available_rows = std::max(1, bottom - top - 1);
 
@@ -267,9 +291,9 @@ void aggregate_cells(
 
 }  // namespace
 
-int run_map_viewer_tool(const std::string & topic) {
+int run_map_viewer_tool(const std::string & topic, bool embedded_mode) {
   auto backend = std::make_shared<MapViewerBackend>(topic);
-  MapViewerScreen screen(backend);
+  MapViewerScreen screen(backend, embedded_mode);
 
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(backend);
@@ -284,12 +308,30 @@ int run_map_viewer_tool(const std::string & topic) {
   return result;
 }
 
-MapViewerScreen::MapViewerScreen(std::shared_ptr<MapViewerBackend> backend)
-: backend_(std::move(backend)) {}
+MapViewerScreen::MapViewerScreen(std::shared_ptr<MapViewerBackend> backend, bool embedded_mode)
+: backend_(std::move(backend)),
+  embedded_mode_(embedded_mode) {}
 
 int MapViewerScreen::run() {
-  Session ncurses_session;
+  std::unique_ptr<Session> ncurses_session;
+  if (!embedded_mode_) {
+    ncurses_session = std::make_unique<Session>();
+  } else {
+    curs_set(0);
+    keypad(stdscr, TRUE);
+    cbreak();
+    noecho();
+  }
+
+  startup_time_ = std::chrono::steady_clock::now();
   timeout(std::max(1, static_cast<int>(1000.0 / backend_->render_hz_)));
+  if (embedded_mode_) {
+    flushinp();
+    timeout(0);
+    while (getch() != ERR) {
+    }
+    timeout(std::max(1, static_cast<int>(1000.0 / backend_->render_hz_)));
+  }
 
   bool running = true;
   while (running && rclcpp::ok()) {
@@ -301,13 +343,32 @@ int MapViewerScreen::run() {
     running = handle_key(key);
   }
 
+  if (embedded_mode_) {
+    timeout(100);
+    curs_set(0);
+    clear();
+    clearok(stdscr, TRUE);
+    refresh();
+  }
+
   return 0;
 }
 
 bool MapViewerScreen::handle_key(int key) {
+  if (
+    embedded_mode_ &&
+    std::chrono::steady_clock::now() - startup_time_ < std::chrono::milliseconds(750))
+  {
+    return true;
+  }
+
   switch (key) {
     case KEY_F(10):
+      return false;
     case 27:
+      if (embedded_mode_) {
+        return false;
+      }
       return false;
     default:
       return true;
@@ -326,15 +387,17 @@ void MapViewerScreen::draw_waiting_message(int top, int left, int bottom, int ri
 }
 
 void MapViewerScreen::draw_legend_line(int row, int left, int width) const {
+  const auto context = render_context();
+  const bool monochrome = context != tui::TerminalContext::Color;
   mvhline(row, left, ' ', width);
   int col = left;
   auto draw_part = [&](CostBucket bucket, const std::string & label) {
-    const int color = bucket_color(bucket, backend_->monochrome_);
+    const int color = bucket_color(bucket, monochrome);
     if (color != 0) {
       attron(COLOR_PAIR(color));
     }
-    mvaddstr(row, col, bucket_glyph(bucket));
-    mvaddstr(row, col + 1, backend_->monochrome_ ? " " : " ");
+    mvaddstr(row, col, bucket_glyph(bucket, context));
+    mvaddstr(row, col + 1, " ");
     if (color != 0) {
       attroff(COLOR_PAIR(color));
     }
@@ -364,6 +427,8 @@ void MapViewerScreen::draw_grid_view(
 
   const std::size_t source_width = static_cast<std::size_t>(message.info.width);
   const std::size_t source_height = static_cast<std::size_t>(message.info.height);
+  const auto context = render_context();
+  const bool monochrome = context != tui::TerminalContext::Color;
   std::ostringstream header_line;
   header_line << "topic=" << backend_->topic_
               << " frame=" << message.header.frame_id
@@ -371,7 +436,9 @@ void MapViewerScreen::draw_grid_view(
               << " src=" << source_width << 'x' << source_height
               << '@' << std::fixed << std::setprecision(2) << message.info.resolution << "m"
               << " rot=" << backend_->rotation_degrees_
-              << " mode=" << (backend_->monochrome_ ? "mono" : "costmap");
+              << " mode=" << (
+                context == tui::TerminalContext::Ascii ? "ascii" :
+                context == tui::TerminalContext::Mono ? "mono" : "costmap");
   mvprintw(top + 1, left, "%-*s", width, truncate_text(header_line.str(), width).c_str());
 
   int map_top = top + 2;
@@ -399,7 +466,7 @@ void MapViewerScreen::draw_grid_view(
     backend_->rotation_degrees_,
     backend_->max_width_,
     backend_->max_height_,
-    backend_->monochrome_);
+    context);
   std::vector<AggregatedCell> aggregated_cells(
     static_cast<std::size_t>(geometry.width) * static_cast<std::size_t>(geometry.height));
   aggregate_cells(message, geometry, backend_->rotation_degrees_, aggregated_cells);
@@ -415,18 +482,18 @@ void MapViewerScreen::draw_grid_view(
       const auto index = static_cast<std::size_t>(render_y * geometry.width + render_x);
       const int8_t value = aggregated_cells[index].occupancy_value;
       if (value <= kOccupancyFreeThreshold && value != kOccupancyUnknown && !backend_->show_free_) {
-        mvaddstr(row, col, backend_->monochrome_ ? " " : "  ");
+        mvaddstr(row, col, context == tui::TerminalContext::Ascii ? " " : "  ");
         col += geometry.cell_width;
         continue;
       }
 
       const auto bucket = cost_bucket(value);
-      const int color = bucket_color(bucket, backend_->monochrome_);
+      const int color = bucket_color(bucket, monochrome);
       if (color != 0) {
         attron(COLOR_PAIR(color));
       }
       for (int repeat = 0; repeat < geometry.cell_width && col < right; ++repeat) {
-        mvaddstr(row, col, bucket_glyph(bucket));
+        mvaddstr(row, col, bucket_glyph(bucket, context));
         ++col;
       }
       if (color != 0) {

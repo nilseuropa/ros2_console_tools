@@ -371,6 +371,13 @@ bool use_unicode_line_drawing() {
   return codeset != nullptr && std::string(codeset).find("UTF-8") != std::string::npos;
 }
 
+TerminalContext terminal_context() {
+  if (!use_unicode_line_drawing()) {
+    return TerminalContext::Ascii;
+  }
+  return has_colors() ? TerminalContext::Color : TerminalContext::Mono;
+}
+
 std::string default_theme_config_path() {
   const std::string installed =
     ament_index_cpp::get_package_share_directory("ros2_console_tools") + "/config/tui_theme.yaml";

@@ -44,6 +44,12 @@ struct SearchState {
   std::string query;
 };
 
+enum class TerminalContext {
+  Color,
+  Mono,
+  Ascii,
+};
+
 enum class SearchInputResult {
   None,
   Changed,
@@ -75,6 +81,7 @@ int find_best_match(const std::vector<std::string> & labels, const std::string &
 std::string truncate_text(const std::string & text, int width);
 
 bool use_unicode_line_drawing();
+TerminalContext terminal_context();
 void draw_box_char(int row, int col, const cchar_t * wide_char, char ascii_char);
 void draw_text_hline(int row, int col, int count);
 void draw_text_vline(int row, int col, int count);
