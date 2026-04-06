@@ -53,6 +53,7 @@ using tui::handle_search_input;
 using tui::is_alt_binding;
 using tui::SearchInputResult;
 using tui::start_search;
+using tui::theme_attr;
 
 }  // namespace
 
@@ -409,9 +410,9 @@ void ParameterCommanderScreen::draw_parameter_list(int top, int left, int bottom
   const std::string header = pad_column("Name", name_width) + " "
     + pad_column("Current", value_width) + " "
     + pad_column("Descriptor", desc_width);
-  attron(COLOR_PAIR(kColorHeader) | A_BOLD);
+  attron(theme_attr(kColorHeader));
   mvaddnstr(top, left, header.c_str(), width);
-  attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
+  attroff(theme_attr(kColorHeader));
 
   attron(COLOR_PAIR(kColorFrame));
   draw_text_vline(top, separator_one_x, visible_rows);
@@ -518,9 +519,9 @@ void ParameterCommanderScreen::draw_node_list(int top, int left, int bottom, int
     backend_->node_scroll_ = backend_->selected_node_index_ - visible_rows + 2;
   }
 
-  attron(COLOR_PAIR(kColorHeader) | A_BOLD);
+  attron(theme_attr(kColorHeader));
   mvaddnstr(top, left, pad_column("Discovered Nodes", width).c_str(), width);
-  attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
+  attroff(theme_attr(kColorHeader));
 
   for (int row = 1; row < visible_rows; ++row) {
     const int entry_index = backend_->node_scroll_ + row - 1;
@@ -578,9 +579,9 @@ void ParameterCommanderScreen::draw_popup(int rows, int columns) {
   } else {
     draw_box(top, left, bottom, right, kColorFrame);
   }
-  attron(COLOR_PAIR(kColorTitle) | A_BOLD);
+  attron(theme_attr(kColorTitle));
   mvprintw(top, left + 2, " Edit Parameter ");
-  attroff(COLOR_PAIR(kColorTitle) | A_BOLD);
+  attroff(theme_attr(kColorTitle));
 
   constexpr int label_width = 11;
   auto draw_popup_field = [&](int row, const std::string & label, const std::string & value) {
@@ -595,13 +596,13 @@ void ParameterCommanderScreen::draw_popup(int rows, int columns) {
 
   attron(COLOR_PAIR(kColorPopup));
   draw_popup_field(top + 1, "name", "");
-  attron(COLOR_PAIR(kColorHeader) | A_BOLD);
+  attron(theme_attr(kColorHeader));
   mvaddnstr(
     top + 1,
     left + 1 + label_width + 2,
     truncate_parameter_line(entry->name, inner_width - label_width - 2).c_str(),
     inner_width - label_width - 2);
-  attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
+  attroff(theme_attr(kColorHeader));
   draw_popup_field(top + 2, "descriptor", backend_->descriptor_summary(entry->descriptor));
   draw_popup_field(
     top + 3,
@@ -613,11 +614,11 @@ void ParameterCommanderScreen::draw_popup(int rows, int columns) {
   draw_text_hline(top + 5, left + 1, inner_width);
   attroff(COLOR_PAIR(kColorPopup));
   draw_box(field_top, field_left, field_top + 2, field_right, kColorFrame);
-  attron(COLOR_PAIR(kColorHeader) | A_BOLD);
+  attron(theme_attr(kColorHeader));
   mvhline(field_top + 1, field_left + 1, ' ', field_inner_width);
   const std::string visible_buffer = tail_fit(popup_buffer_, edit_text_width);
   mvaddnstr(field_top + 1, field_left + 1, visible_buffer.c_str(), edit_text_width);
-  attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
+  attroff(theme_attr(kColorHeader));
   if (backend_->popup_is_editable(*entry) && software_caret_visible()) {
     const int visible_buffer_width = std::min(edit_text_width, static_cast<int>(visible_buffer.size()));
     const int cursor_x = std::min(field_left + field_inner_width - 1, field_left + 1 + visible_buffer_width);

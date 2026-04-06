@@ -62,6 +62,7 @@ public:
 
 Theme make_default_theme();
 const Theme & current_theme();
+int theme_attr(int role);
 void set_theme(const Theme & theme);
 std::string default_theme_config_path();
 bool load_theme_from_file(const std::string & path, std::string * error = nullptr);

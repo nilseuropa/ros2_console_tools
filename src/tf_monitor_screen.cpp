@@ -47,6 +47,7 @@ using tui::handle_search_input;
 using tui::is_alt_binding;
 using tui::SearchInputResult;
 using tui::start_search;
+using tui::theme_attr;
 using tui::truncate_text;
 
 }  // namespace
@@ -215,11 +216,11 @@ void TfMonitorScreen::draw_tree_pane(int top, int left, int bottom, int right) {
     backend_->scroll_ = std::max(0, backend_->selected_index_ - visible_rows + 2);
   }
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", tree_width, "Transform");
   draw_box_char(top, sep_one_x, WACS_VLINE, '|');
   mvprintw(top, sep_one_x + 1, "%-*s", freshness_width, "Freshness");
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   const int first_row = backend_->scroll_;
   const int last_row = std::min(static_cast<int>(backend_->rows_.size()), first_row + visible_rows - 1);
@@ -298,9 +299,9 @@ void TfMonitorScreen::draw_inspect_popup(int rows, int columns) const {
   }
   draw_box(top, left, bottom, right, kColorFrame);
 
-  attron(COLOR_PAIR(kColorHeader) | A_BOLD);
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left + 2, " TF Inspect ");
-  attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
+  attroff(theme_attr(kColorHeader));
 
   const Vec3 rpy = rpy_from_quat(backend_->inspect_result_.transform.rotation);
   const auto print_line = [&](int row, const std::string & text) {

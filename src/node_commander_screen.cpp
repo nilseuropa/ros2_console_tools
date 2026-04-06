@@ -37,6 +37,7 @@ using tui::handle_search_input;
 using tui::is_alt_binding;
 using tui::SearchInputResult;
 using tui::start_search;
+using tui::theme_attr;
 using tui::truncate_text;
 
 void resume_parent_screen() {
@@ -363,9 +364,9 @@ void NodeCommanderScreen::draw() {
   const int content_bottom = rows - 3;
 
   draw_box(0, 0, content_bottom, columns - 1, kColorFrame);
-  attron(COLOR_PAIR(kColorTitle));
+  attron(theme_attr(kColorTitle));
   mvprintw(0, 1, "Node Commander ");
-  attroff(COLOR_PAIR(kColorTitle));
+  attroff(theme_attr(kColorTitle));
 
   const int left_width = std::max(28, (columns - 2) / 3);
   const int separator_x = 1 + left_width;
@@ -415,9 +416,9 @@ void NodeCommanderScreen::draw_node_list(int top, int left, int bottom, int righ
     backend_->node_scroll_ = std::max(0, backend_->selected_index_ - visible_rows + 2);
   }
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, focus_pane_ == NodeCommanderFocusPane::NodeList ? "Nodes <" : "Nodes");
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   const int first_row = backend_->node_scroll_;
   const int last_row = std::min(static_cast<int>(backend_->node_entries_.size()), first_row + visible_rows - 1);
@@ -459,9 +460,9 @@ void NodeCommanderScreen::draw_detail_pane(int top, int left, int bottom, int ri
     detail_scroll_ = std::max(0, detail_selected_index_ - visible_rows + 1);
   }
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, focus_pane_ == NodeCommanderFocusPane::DetailPane ? "Details <" : "Details");
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   int row_y = top + 1;
   const int first_row = detail_scroll_;
@@ -474,9 +475,9 @@ void NodeCommanderScreen::draw_detail_pane(int top, int left, int bottom, int ri
       mvchgat(row_y, left, width, A_NORMAL, kColorSelection, nullptr);
     }
     if (line.is_header) {
-      attron(COLOR_PAIR(kColorHeader));
+      attron(theme_attr(kColorHeader));
       mvprintw(row_y, left, "%-*s", width, truncate_text(line.text, width).c_str());
-      attroff(COLOR_PAIR(kColorHeader));
+      attroff(theme_attr(kColorHeader));
     } else if (line.action != NodeDetailAction::None) {
       attron(COLOR_PAIR(kColorAccent));
       mvprintw(row_y, left, "%-*s", width, truncate_text(line.text, width).c_str());

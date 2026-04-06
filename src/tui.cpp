@@ -215,6 +215,13 @@ const Theme & current_theme() {
   return g_theme;
 }
 
+int theme_attr(int role) {
+  if (role <= 0 || role >= kThemeColorCount) {
+    return A_NORMAL;
+  }
+  return COLOR_PAIR(role) | g_theme[static_cast<std::size_t>(role)].attributes;
+}
+
 void set_theme(const Theme & theme) {
   g_theme = theme;
   if (!has_colors()) {

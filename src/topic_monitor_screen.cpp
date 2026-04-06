@@ -46,6 +46,7 @@ using tui::handle_search_input;
 using tui::is_alt_binding;
 using tui::SearchInputResult;
 using tui::start_search;
+using tui::theme_attr;
 using tui::truncate_text;
 
 }  // namespace
@@ -280,7 +281,7 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
     backend_->list_scroll_ = std::max(0, backend_->selected_index_ - visible_rows + 2);
   }
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", topic_width, "Topic");
   draw_box_char(top, sep_one_x, WACS_VLINE, '|');
   mvprintw(top, sep_one_x + 1, "%-*s", avg_width, "Avg Hz");
@@ -288,7 +289,7 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
   mvprintw(top, sep_two_x + 1, "%-*s", minmax_width, "Min/Max Hz");
   draw_box_char(top, sep_three_x, WACS_VLINE, '|');
   mvprintw(top, sep_three_x + 1, "%-*s", bandwidth_width, "Bandwidth");
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   const int first_row = backend_->list_scroll_;
   const int last_row = std::min(static_cast<int>(items.size()), first_row + visible_rows - 1);
@@ -383,11 +384,11 @@ void TopicMonitorScreen::draw_topic_detail(int top, int left, int bottom, int ri
     backend_->detail_scroll_ = std::max(0, backend_->selected_detail_index_ - visible_rows + 2);
   }
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", field_width, "Field");
   draw_box_char(top, separator_x, WACS_VLINE, '|');
   mvprintw(top, separator_x + 1, "%-*s", value_width, "Value");
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   const int first_row = backend_->detail_scroll_;
   const int last_row = std::min(static_cast<int>(rows.size()), first_row + visible_rows - 1);

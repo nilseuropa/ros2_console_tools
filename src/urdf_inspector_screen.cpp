@@ -47,6 +47,7 @@ using tui::handle_search_input;
 using tui::is_alt_binding;
 using tui::SearchInputResult;
 using tui::start_search;
+using tui::theme_attr;
 using tui::truncate_text;
 
 }  // namespace
@@ -427,9 +428,9 @@ void UrdfInspectorScreen::draw() {
   const int content_bottom = std::max(1, status_row - 1);
 
   draw_box(0, 0, content_bottom, columns - 1, kColorFrame);
-  attron(COLOR_PAIR(kColorTitle));
+  attron(theme_attr(kColorTitle));
   mvprintw(0, 1, "URDF Inspector ");
-  attroff(COLOR_PAIR(kColorTitle));
+  attroff(theme_attr(kColorTitle));
 
   const int left_width = std::max(28, (columns - 2) / 2);
   const int separator_x = 1 + left_width;
@@ -459,9 +460,9 @@ void UrdfInspectorScreen::draw_tree_pane(int top, int left, int bottom, int righ
     backend_->tree_scroll_ = std::max(0, backend_->selected_index_ - visible_rows + 2);
   }
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, "Tree");
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   const int first_row = backend_->tree_scroll_;
   const int last_row = std::min(static_cast<int>(backend_->rows_.size()), first_row + visible_rows - 1);
@@ -498,9 +499,9 @@ void UrdfInspectorScreen::draw_details_pane(int top, int left, int bottom, int r
   const int width = right - left + 1;
   const auto lines = backend_->selected_details();
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, "Details");
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   int row_y = top + 1;
   for (const auto & line : lines) {
@@ -532,9 +533,9 @@ void UrdfInspectorScreen::draw_xml_popup(int rows, int columns) const {
   }
   draw_box(top, left, bottom, right, kColorFrame);
 
-  attron(COLOR_PAIR(kColorHeader) | A_BOLD);
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left + 2, " %s ", truncate_text(popup_title_, popup_width - 6).c_str());
-  attroff(COLOR_PAIR(kColorHeader) | A_BOLD);
+  attroff(theme_attr(kColorHeader));
 
   const int max_scroll = std::max(0, static_cast<int>(popup_lines_.size()) - visible_rows);
   const int scroll = std::clamp(popup_scroll_, 0, max_scroll);

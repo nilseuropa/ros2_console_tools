@@ -61,6 +61,7 @@ using tui::handle_search_input;
 using tui::is_alt_binding;
 using tui::SearchInputResult;
 using tui::start_search;
+using tui::theme_attr;
 
 }  // namespace
 
@@ -428,9 +429,9 @@ void LogViewerScreen::draw() {
   const int content_bottom = std::max(1, status_row - 1);
 
   draw_box(0, 0, content_bottom, columns - 1, kColorFrame);
-  attron(COLOR_PAIR(kColorTitle));
+  attron(theme_attr(kColorTitle));
   mvprintw(0, 1, "Log Viewer ");
-  attroff(COLOR_PAIR(kColorTitle));
+  attroff(theme_attr(kColorTitle));
   if (backend_->view_mode_ == LogViewerViewMode::CodeInspect) {
     draw_code_view_pane(1, 1, content_bottom - 1, columns - 2);
   } else if (backend_->view_mode_ == LogViewerViewMode::Split) {
@@ -567,9 +568,9 @@ void LogViewerScreen::draw_code_line(
     return;
   }
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvaddnstr(row, left, line_prefix.c_str(), width);
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   int column = left + static_cast<int>(line_prefix.size());
   const int remaining = std::max(0, width - static_cast<int>(line_prefix.size()));
@@ -597,9 +598,9 @@ void LogViewerScreen::draw_code_view_pane(int top, int left, int bottom, int rig
   const std::string title =
     truncate_text("Code: " + backend_->code_view_path_ + ":" + std::to_string(backend_->code_view_target_line_), width);
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, title.c_str());
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   const int max_top_line = std::max(0, static_cast<int>(backend_->code_view_lines_.size()) - (visible_rows - 1));
   const int top_line = std::clamp(backend_->code_view_top_line_, 0, max_top_line);
@@ -628,9 +629,9 @@ void LogViewerScreen::draw_sources_pane(int top, int left, int bottom, int right
     backend_->source_scroll_ = std::max(0, backend_->selected_source_index_ - visible_rows + 2);
   }
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, "Sources");
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   const int first_row = backend_->source_scroll_;
   const int last_row = std::min(static_cast<int>(snapshot.size()), first_row + visible_rows - 1);
@@ -679,7 +680,7 @@ void LogViewerScreen::draw_logs_pane(int top, int left, int bottom, int right) {
     backend_->log_scroll_ = std::max(0, backend_->selected_log_index_ - visible_rows + 2);
   }
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", time_width, "Time");
   draw_box_char(top, sep_one_x, WACS_VLINE, '|');
   mvprintw(top, sep_one_x + 1, "%-*s", level_width, "Level");
@@ -687,7 +688,7 @@ void LogViewerScreen::draw_logs_pane(int top, int left, int bottom, int right) {
   mvprintw(top, sep_two_x + 1, "%-*s", source_width, "Source");
   draw_box_char(top, sep_three_x, WACS_VLINE, '|');
   mvprintw(top, sep_three_x + 1, "%-*s", message_width, "Message");
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   const int first_row = backend_->log_scroll_;
   const int last_row = std::min(static_cast<int>(snapshot.size()), first_row + visible_rows - 1);
@@ -746,9 +747,9 @@ void LogViewerScreen::draw_live_source_pane(int top, int left, int bottom, int r
     backend_->live_log_scroll_ = std::max(0, backend_->selected_live_log_index_ - visible_rows + 2);
   }
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, truncate_text("Live: " + backend_->live_source_name_, width).c_str());
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   const int first_row = backend_->live_log_scroll_;
   const int last_row = std::min(static_cast<int>(snapshot.size()), first_row + visible_rows - 1);

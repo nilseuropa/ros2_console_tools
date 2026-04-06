@@ -53,6 +53,7 @@ using tui::handle_search_input;
 using tui::is_alt_binding;
 using tui::SearchInputResult;
 using tui::start_search;
+using tui::theme_attr;
 using tui::truncate_text;
 
 }  // namespace
@@ -293,9 +294,9 @@ void ServiceCommanderScreen::draw() {
   const int content_bottom = std::max(1, status_row - 1);
 
   draw_box(0, 0, content_bottom, columns - 1, kColorFrame);
-  attron(COLOR_PAIR(kColorTitle));
+  attron(theme_attr(kColorTitle));
   mvprintw(0, 1, "Service Commander ");
-  attroff(COLOR_PAIR(kColorTitle));
+  attroff(theme_attr(kColorTitle));
   if (backend_->view_mode_ == ServiceCommanderViewMode::ServiceList) {
     draw_service_list(1, 1, content_bottom - 1, columns - 2);
   } else {
@@ -325,11 +326,11 @@ void ServiceCommanderScreen::draw_service_list(int top, int left, int bottom, in
     backend_->service_scroll_ = std::max(0, backend_->selected_service_index_ - visible_rows + 2);
   }
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", name_width, "Service");
   draw_box_char(top, separator_x, WACS_VLINE, '|');
   mvprintw(top, separator_x + 1, "%-*s", type_width, "Type");
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   const int first_row = backend_->service_scroll_;
   const int last_row = std::min(static_cast<int>(backend_->services_.size()), first_row + visible_rows - 1);
@@ -358,9 +359,9 @@ void ServiceCommanderScreen::draw_service_list(int top, int left, int bottom, in
 
 void ServiceCommanderScreen::draw_response_panel(int top, int left, int bottom, int right) const {
   const int width = right - left + 1;
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, "Response");
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   int row_y = top + 1;
   if (!backend_->response_error_.empty()) {
@@ -389,9 +390,9 @@ void ServiceCommanderScreen::draw_service_detail(int top, int left, int bottom, 
   draw_text_vline(top, separator_x, bottom - top + 1);
   attroff(COLOR_PAIR(kColorFrame));
 
-  attron(COLOR_PAIR(kColorHeader));
+  attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", request_width, "Request");
-  attroff(COLOR_PAIR(kColorHeader));
+  attroff(theme_attr(kColorHeader));
 
   const int visible_rows = std::max(1, bottom - top);
   if (backend_->selected_request_index_ < backend_->request_scroll_) {
@@ -448,9 +449,9 @@ void ServiceCommanderScreen::draw_edit_popup(int rows, int columns) const {
     attroff(COLOR_PAIR(kColorPopup));
   }
   draw_box(top, left, bottom, right, kColorFrame);
-  attron(COLOR_PAIR(kColorTitle) | A_BOLD);
+  attron(theme_attr(kColorTitle));
   mvprintw(top, left + 2, " Edit Request Field ");
-  attroff(COLOR_PAIR(kColorTitle) | A_BOLD);
+  attroff(theme_attr(kColorTitle));
 
   mvprintw(top + 1, left + 2, "%s", truncate_text(row->field, popup_width - 4).c_str());
   mvprintw(top + 2, left + 2, "type: %u", static_cast<unsigned int>(row->type_id));

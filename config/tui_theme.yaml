@@ -6,11 +6,11 @@ tui_theme:
   title:
     foreground: white
     background: default
-    attributes: []
+    attributes: [bold]
   header:
-    foreground: yellow
+    foreground: cyan
     background: default
-    attributes: []
+    attributes: [bold]
   selection:
     foreground: black
     background: yellow
@@ -18,7 +18,7 @@ tui_theme:
   status:
     foreground: white
     background: default
-    attributes: []
+    attributes: [bold]
   help:
     foreground: black
     background: cyan
