@@ -389,6 +389,41 @@ Main files:
 - [src/urdf_inspector_screen.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/urdf_inspector_screen.cpp)
 - [src/urdf_inspector.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/urdf_inspector.cpp)
 
+### map_viewer
+
+Binary:
+
+```bash
+ros2 run ros2_console_tools map_viewer
+```
+
+Optional topic argument:
+
+```bash
+ros2 run ros2_console_tools map_viewer /map
+```
+
+Purpose:
+
+- terminal visualization of `nav_msgs/msg/OccupancyGrid`
+- rotated map rendering
+- costmap-style block rendering
+- monochrome/legend control
+
+Highlights:
+
+- same backend/screen/thin-main structure as the other tools
+- shared ncurses/TUI foundation
+- launchable through a reusable `run_map_viewer_tool(...)` entry point
+- preserves the existing occupancy-grid oriented parameters
+
+Main files:
+
+- [include/ros2_console_tools/map_viewer.hpp](/home/nils/dev_ws/src/ros2_console_tools/include/ros2_console_tools/map_viewer.hpp)
+- [src/map_viewer_backend.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/map_viewer_backend.cpp)
+- [src/map_viewer_screen.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/map_viewer_screen.cpp)
+- [src/map_viewer.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/map_viewer.cpp)
+
 ## Shared TUI Layer
 
 The shared TUI is the most important foundation for future growth.
@@ -422,32 +457,3 @@ The intended path is:
 4. later host multiple screens inside a top-level `ros2_commander`
 
 The current code structure already supports this direction.
-
-## Legacy / Not Yet Conforming
-
-### occupancy_grid_node
-
-Binary:
-
-```bash
-ros2 run ros2_console_tools occupancy_grid_node
-```
-
-Purpose:
-
-- terminal visualization of `nav_msgs/msg/OccupancyGrid`
-- rotated map rendering
-- costmap-style block rendering
-- legend and monochrome/rotation parameters
-
-Why it is separate here:
-
-- it predates the current layered tool architecture
-- it is still a standalone renderer node, not a `backend + screen + thin main` tool
-- it does not yet use the same refactored library structure as the newer tools
-
-Main file:
-
-- [src/occupancy_grid_node.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/occupancy_grid_node.cpp)
-
-It should eventually be brought into the same architectural model as the rest of the package.

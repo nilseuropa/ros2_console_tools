@@ -24,17 +24,27 @@ find_package(rosidl_typesupport_introspection_cpp REQUIRED)
 find_package(tf2_msgs REQUIRED)
 find_package(urdf REQUIRED)
 
-add_executable(occupancy_grid_node src/occupancy_grid_node.cpp)
-target_sources(occupancy_grid_node PRIVATE src/tui.cpp)
-ament_target_dependencies(occupancy_grid_node
+add_library(map_viewer_lib
+  src/map_viewer_backend.cpp
+  src/map_viewer_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(map_viewer_lib
   ament_index_cpp
   nav_msgs
   rclcpp
 )
-target_include_directories(occupancy_grid_node PRIVATE include)
-target_link_libraries(occupancy_grid_node ${NCURSESW_LIBRARY})
+target_include_directories(map_viewer_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(map_viewer_lib ${NCURSESW_LIBRARY})
 
-install(TARGETS occupancy_grid_node
+add_executable(map_viewer src/map_viewer.cpp)
+ament_target_dependencies(map_viewer
+  rclcpp
+)
+target_include_directories(map_viewer PRIVATE ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(map_viewer map_viewer_lib)
+
+install(TARGETS map_viewer_lib map_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 
