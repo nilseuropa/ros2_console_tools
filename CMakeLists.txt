@@ -54,16 +54,27 @@ install(TARGETS parameter_commander_lib parameter_commander
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_library(topic_monitor_lib
+  src/topic_monitor_backend.cpp
+  src/topic_monitor_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(topic_monitor_lib
+  rclcpp
+  rosidl_typesupport_introspection_cpp
+)
+target_include_directories(topic_monitor_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(topic_monitor_lib ${NCURSESW_LIBRARY})
+
 add_executable(topic_monitor src/topic_monitor.cpp)
-target_sources(topic_monitor PRIVATE src/tui.cpp)
 ament_target_dependencies(topic_monitor
   rclcpp
   rosidl_typesupport_introspection_cpp
 )
 target_include_directories(topic_monitor PRIVATE ${CURSES_INCLUDE_DIR} include)
-target_link_libraries(topic_monitor ${NCURSESW_LIBRARY})
+target_link_libraries(topic_monitor topic_monitor_lib)
 
-install(TARGETS topic_monitor
+install(TARGETS topic_monitor_lib topic_monitor
   DESTINATION lib/${PROJECT_NAME}
 )
 
