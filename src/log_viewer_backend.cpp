@@ -7,7 +7,17 @@
 namespace ros2_console_tools {
 
 LogViewerBackend::LogViewerBackend()
-: Node("log_viewer") {}
+: Node("log_viewer")
+{
+  const std::string theme_config_path =
+    this->declare_parameter<std::string>("theme_config_path", tui::default_theme_config_path());
+  std::string theme_error;
+  if (!tui::load_theme_from_file(theme_config_path, &theme_error)) {
+    if (theme_config_path != tui::default_theme_config_path()) {
+      RCLCPP_WARN(this->get_logger(), "%s", theme_error.c_str());
+    }
+  }
+}
 
 void LogViewerBackend::initialize_subscription() {
   log_subscription_ = this->create_subscription<LogMessage>(

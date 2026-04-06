@@ -1,0 +1,69 @@
+tui_theme:
+  frame:
+    foreground: cyan
+    background: default
+    attributes: []
+  title:
+    foreground: white
+    background: default
+    attributes: []
+  header:
+    foreground: yellow
+    background: default
+    attributes: []
+  selection:
+    foreground: black
+    background: yellow
+    attributes: []
+  status:
+    foreground: green
+    background: default
+    attributes: []
+  help:
+    foreground: black
+    background: cyan
+    attributes: []
+  popup:
+    foreground: white
+    background: default
+    attributes: []
+  input:
+    foreground: yellow
+    background: default
+    attributes: []
+  dirty:
+    foreground: red
+    background: default
+    attributes: []
+  cursor:
+    foreground: black
+    background: yellow
+    attributes: [bold]
+  positive:
+    foreground: green
+    background: default
+    attributes: []
+  positive_selection:
+    foreground: green
+    background: yellow
+    attributes: []
+  warn:
+    foreground: yellow
+    background: default
+    attributes: []
+  error:
+    foreground: red
+    background: default
+    attributes: []
+  fatal:
+    foreground: red
+    background: yellow
+    attributes: []
+  accent:
+    foreground: cyan
+    background: default
+    attributes: []
+  help_key:
+    foreground: black
+    background: yellow
+    attributes: [bold]

@@ -1,9 +1,13 @@
 #include "ros2_console_tools/tui.hpp"
 
+#include <ament_index_cpp/get_package_share_directory.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <clocale>
+#include <fstream>
 #include <langinfo.h>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -18,6 +22,8 @@ struct HelpBlock {
   std::string key;
   std::string label;
 };
+
+std::string to_lower(std::string text);
 
 void set_color_role(
   Theme & theme, int role, short foreground, short background, int attributes = A_NORMAL)
@@ -62,6 +68,101 @@ std::vector<HelpBlock> parse_help_blocks(const std::string & text) {
     }
   }
   return blocks;
+}
+
+std::vector<std::string> split_list(const std::string & text) {
+  std::vector<std::string> values;
+  std::string current;
+  for (char ch : text) {
+    if (ch == ',') {
+      const std::string trimmed = trim(current);
+      if (!trimmed.empty()) {
+        values.push_back(trimmed);
+      }
+      current.clear();
+      continue;
+    }
+    current.push_back(ch);
+  }
+  const std::string trimmed = trim(current);
+  if (!trimmed.empty()) {
+    values.push_back(trimmed);
+  }
+  return values;
+}
+
+short parse_color_name(const std::string & value) {
+  static const std::map<std::string, short> colors = {
+    {"default", -1},
+    {"black", COLOR_BLACK},
+    {"red", COLOR_RED},
+    {"green", COLOR_GREEN},
+    {"yellow", COLOR_YELLOW},
+    {"blue", COLOR_BLUE},
+    {"magenta", COLOR_MAGENTA},
+    {"cyan", COLOR_CYAN},
+    {"white", COLOR_WHITE},
+  };
+  const auto found = colors.find(to_lower(trim(value)));
+  return found == colors.end() ? static_cast<short>(-2) : found->second;
+}
+
+int parse_attributes(const std::string & value) {
+  const std::string trimmed = trim(value);
+  if (trimmed == "[]" || trimmed.empty()) {
+    return A_NORMAL;
+  }
+
+  std::string inner = trimmed;
+  if (!inner.empty() && inner.front() == '[') {
+    inner.erase(inner.begin());
+  }
+  if (!inner.empty() && inner.back() == ']') {
+    inner.pop_back();
+  }
+
+  int attributes = A_NORMAL;
+  for (const auto & item : split_list(inner)) {
+    const std::string name = to_lower(item);
+    if (name == "bold") {
+      attributes |= A_BOLD;
+    } else if (name == "reverse") {
+      attributes |= A_REVERSE;
+    } else if (name == "underline") {
+      attributes |= A_UNDERLINE;
+    } else if (name == "dim") {
+      attributes |= A_DIM;
+    }
+  }
+  return attributes;
+}
+
+bool parse_theme_role(const std::string & value, int * role) {
+  static const std::map<std::string, int> roles = {
+    {"frame", kColorFrame},
+    {"title", kColorTitle},
+    {"header", kColorHeader},
+    {"selection", kColorSelection},
+    {"status", kColorStatus},
+    {"help", kColorHelp},
+    {"popup", kColorPopup},
+    {"input", kColorInput},
+    {"dirty", kColorDirty},
+    {"cursor", kColorCursor},
+    {"positive", kColorPositive},
+    {"positive_selection", kColorPositiveSelection},
+    {"warn", kColorWarn},
+    {"error", kColorError},
+    {"fatal", kColorFatal},
+    {"accent", kColorAccent},
+    {"help_key", kColorHelpKey},
+  };
+  const auto found = roles.find(to_lower(trim(value)));
+  if (found == roles.end()) {
+    return false;
+  }
+  *role = found->second;
+  return true;
 }
 
 std::string to_lower(std::string text) {
@@ -230,6 +331,92 @@ std::string truncate_text(const std::string & text, int width) {
 bool use_unicode_line_drawing() {
   const char * codeset = nl_langinfo(CODESET);
   return codeset != nullptr && std::string(codeset).find("UTF-8") != std::string::npos;
+}
+
+std::string default_theme_config_path() {
+  return ament_index_cpp::get_package_share_directory("ros2_console_tools") + "/config/tui_theme.yaml";
+}
+
+bool load_theme_from_file(const std::string & path, std::string * error) {
+  std::ifstream input(path);
+  if (!input.is_open()) {
+    if (error != nullptr) {
+      *error = "Failed to open theme config: " + path;
+    }
+    return false;
+  }
+
+  Theme theme = make_default_theme();
+  std::string line;
+  int current_role = 0;
+  bool in_theme = false;
+
+  while (std::getline(input, line)) {
+    const std::size_t comment = line.find('#');
+    if (comment != std::string::npos) {
+      line.erase(comment);
+    }
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    if (trim(line).empty()) {
+      continue;
+    }
+
+    const std::size_t indent = line.find_first_not_of(' ');
+    const std::string stripped = trim(line);
+    if (indent == 0 && stripped == "tui_theme:") {
+      in_theme = true;
+      current_role = 0;
+      continue;
+    }
+    if (!in_theme) {
+      continue;
+    }
+
+    if (indent == 2 && stripped.back() == ':') {
+      std::string role_name = stripped.substr(0, stripped.size() - 1);
+      if (!parse_theme_role(role_name, &current_role)) {
+        current_role = 0;
+      }
+      continue;
+    }
+
+    if (indent == 4 && current_role != 0) {
+      const std::size_t separator = stripped.find(':');
+      if (separator == std::string::npos) {
+        continue;
+      }
+      const std::string key = to_lower(trim(stripped.substr(0, separator)));
+      const std::string value = trim(stripped.substr(separator + 1));
+
+      auto & color = theme[static_cast<std::size_t>(current_role)];
+      if (key == "foreground") {
+        const short parsed = parse_color_name(value);
+        if (parsed == -2) {
+          if (error != nullptr) {
+            *error = "Unknown foreground color in theme: " + value;
+          }
+          return false;
+        }
+        color.foreground = parsed;
+      } else if (key == "background") {
+        const short parsed = parse_color_name(value);
+        if (parsed == -2) {
+          if (error != nullptr) {
+            *error = "Unknown background color in theme: " + value;
+          }
+          return false;
+        }
+        color.background = parsed;
+      } else if (key == "attributes") {
+        color.attributes = parse_attributes(value);
+      }
+    }
+  }
+
+  set_theme(theme);
+  return true;
 }
 
 void draw_box_char(int row, int col, const cchar_t * wide_char, char ascii_char) {

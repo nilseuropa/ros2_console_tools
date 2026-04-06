@@ -3,7 +3,17 @@
 namespace ros2_console_tools {
 
 TopicMonitorBackend::TopicMonitorBackend()
-: Node("topic_monitor") {}
+: Node("topic_monitor")
+{
+  const std::string theme_config_path =
+    this->declare_parameter<std::string>("theme_config_path", tui::default_theme_config_path());
+  std::string theme_error;
+  if (!tui::load_theme_from_file(theme_config_path, &theme_error)) {
+    if (theme_config_path != tui::default_theme_config_path()) {
+      RCLCPP_WARN(this->get_logger(), "%s", theme_error.c_str());
+    }
+  }
+}
 
 void TopicMonitorBackend::refresh_topics() {
   const auto discovered_topics = this->get_topic_names_and_types();

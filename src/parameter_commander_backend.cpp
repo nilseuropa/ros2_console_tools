@@ -11,6 +11,14 @@ ParameterCommanderBackend::ParameterCommanderBackend(const std::string & target_
 : Node("parameter_commander"),
   target_node_(normalize_target_name(this->declare_parameter<std::string>("target_node", target_node)))
 {
+  const std::string theme_config_path =
+    this->declare_parameter<std::string>("theme_config_path", tui::default_theme_config_path());
+  std::string theme_error;
+  if (!tui::load_theme_from_file(theme_config_path, &theme_error)) {
+    if (theme_config_path != tui::default_theme_config_path()) {
+      RCLCPP_WARN(this->get_logger(), "%s", theme_error.c_str());
+    }
+  }
   current_view_ = target_node_.empty()
     ? ParameterCommanderViewMode::NodeList
     : ParameterCommanderViewMode::ParameterList;

@@ -21,6 +21,8 @@
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include "ros2_console_tools/tui.hpp"
+
 namespace {
 
 using OccupancyGrid = nav_msgs::msg::OccupancyGrid;
@@ -270,6 +272,7 @@ public:
   OccupancyGridCliNode()
   : Node("occupancy_grid_visualizer"),
     stdout_is_tty_(::isatty(STDOUT_FILENO) != 0) {
+    (void)this->declare_parameter<std::string>("theme_config_path", ros2_console_tools::tui::default_theme_config_path());
     topic_ = this->declare_parameter<std::string>("topic", "/map");
     render_hz_ = std::max(1.0, this->declare_parameter<double>("render_hz", 5.0));
     max_width_ = std::max(0, static_cast<int>(this->declare_parameter("max_width", 0)));

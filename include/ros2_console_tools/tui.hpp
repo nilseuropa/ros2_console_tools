@@ -63,6 +63,8 @@ public:
 Theme make_default_theme();
 const Theme & current_theme();
 void set_theme(const Theme & theme);
+std::string default_theme_config_path();
+bool load_theme_from_file(const std::string & path, std::string * error = nullptr);
 bool is_alt_binding(int key, int expected);
 void start_search(SearchState & state);
 SearchInputResult handle_search_input(SearchState & state, int key);

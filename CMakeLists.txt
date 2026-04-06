@@ -12,6 +12,7 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 set(CURSES_NEED_WIDE TRUE)
 find_package(Curses REQUIRED)
 find_library(NCURSESW_LIBRARY NAMES ncursesw)
@@ -24,10 +25,14 @@ find_package(tf2_msgs REQUIRED)
 find_package(urdf REQUIRED)
 
 add_executable(occupancy_grid_node src/occupancy_grid_node.cpp)
+target_sources(occupancy_grid_node PRIVATE src/tui.cpp)
 ament_target_dependencies(occupancy_grid_node
+  ament_index_cpp
   nav_msgs
   rclcpp
 )
+target_include_directories(occupancy_grid_node PRIVATE include)
+target_link_libraries(occupancy_grid_node ${NCURSESW_LIBRARY})
 
 install(TARGETS occupancy_grid_node
   DESTINATION lib/${PROJECT_NAME}
@@ -39,6 +44,7 @@ add_library(parameter_commander_lib
   src/tui.cpp
 )
 ament_target_dependencies(parameter_commander_lib
+  ament_index_cpp
   rclcpp
 )
 target_include_directories(parameter_commander_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
@@ -61,6 +67,7 @@ add_library(topic_monitor_lib
   src/tui.cpp
 )
 ament_target_dependencies(topic_monitor_lib
+  ament_index_cpp
   rclcpp
   rosidl_typesupport_introspection_cpp
 )
@@ -85,6 +92,7 @@ add_library(log_viewer_lib
   src/tui.cpp
 )
 ament_target_dependencies(log_viewer_lib
+  ament_index_cpp
   rcl_interfaces
   rclcpp
 )
@@ -109,6 +117,7 @@ add_library(service_commander_lib
   src/tui.cpp
 )
 ament_target_dependencies(service_commander_lib
+  ament_index_cpp
   rclcpp
   rosidl_typesupport_introspection_cpp
 )
@@ -133,6 +142,7 @@ add_library(tf_monitor_lib
   src/tui.cpp
 )
 ament_target_dependencies(tf_monitor_lib
+  ament_index_cpp
   geometry_msgs
   rclcpp
   tf2_msgs
@@ -159,6 +169,7 @@ add_library(urdf_inspector_lib
   src/tui.cpp
 )
 ament_target_dependencies(urdf_inspector_lib
+  ament_index_cpp
   rclcpp
   urdf
 )
@@ -179,6 +190,10 @@ install(TARGETS urdf_inspector_lib urdf_inspector
 
 install(DIRECTORY include/
   DESTINATION include
+)
+
+install(DIRECTORY config/
+  DESTINATION share/${PROJECT_NAME}
 )
 
 ament_package()
