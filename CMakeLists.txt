@@ -15,6 +15,7 @@ find_package(ament_cmake REQUIRED)
 find_package(Curses REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(rosidl_typesupport_introspection_cpp REQUIRED)
 
 add_executable(occupancy_grid_node src/occupancy_grid_node.cpp)
@@ -47,6 +48,18 @@ target_include_directories(topic_monitor PRIVATE ${CURSES_INCLUDE_DIR})
 target_link_libraries(topic_monitor ${CURSES_LIBRARIES})
 
 install(TARGETS topic_monitor
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(log_viewer src/log_viewer.cpp)
+ament_target_dependencies(log_viewer
+  rcl_interfaces
+  rclcpp
+)
+target_include_directories(log_viewer PRIVATE ${CURSES_INCLUDE_DIR})
+target_link_libraries(log_viewer ${CURSES_LIBRARIES})
+
+install(TARGETS log_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 

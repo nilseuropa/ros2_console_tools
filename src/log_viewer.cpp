@@ -1,0 +1,753 @@
+#include <ncurses.h>
+
+#include <algorithm>
+#include <chrono>
+#include <clocale>
+#include <cstdint>
+#include <deque>
+#include <iomanip>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include <rcl_interfaces/msg/log.hpp>
+#include <rclcpp/rclcpp.hpp>
+
+namespace ros2_console_tools {
+
+namespace {
+
+using Clock = std::chrono::steady_clock;
+using LogMessage = rcl_interfaces::msg::Log;
+
+enum ColorPairId {
+  kColorFrame = 1,
+  kColorTitle = 2,
+  kColorHeader = 3,
+  kColorSelection = 4,
+  kColorStatus = 5,
+  kColorHelp = 6,
+  kColorWarn = 7,
+  kColorError = 8,
+  kColorFatal = 9,
+  kColorSource = 10,
+  kColorPopup = 11,
+};
+
+enum class PaneFocus {
+  Sources,
+  Logs,
+};
+
+class NcursesSession {
+public:
+  NcursesSession() {
+    std::setlocale(LC_ALL, "");
+    initscr();
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+    curs_set(0);
+    timeout(100);
+    if (has_colors()) {
+      start_color();
+      use_default_colors();
+      init_pair(kColorFrame, COLOR_CYAN, -1);
+      init_pair(kColorTitle, COLOR_WHITE, -1);
+      init_pair(kColorHeader, COLOR_YELLOW, -1);
+      init_pair(kColorSelection, COLOR_BLACK, COLOR_YELLOW);
+      init_pair(kColorStatus, COLOR_GREEN, -1);
+      init_pair(kColorHelp, COLOR_BLACK, COLOR_CYAN);
+      init_pair(kColorWarn, COLOR_YELLOW, -1);
+      init_pair(kColorError, COLOR_RED, -1);
+      init_pair(kColorFatal, COLOR_RED, COLOR_YELLOW);
+      init_pair(kColorSource, COLOR_CYAN, -1);
+      init_pair(kColorPopup, COLOR_WHITE, -1);
+    }
+  }
+
+  ~NcursesSession() {
+    curs_set(1);
+    endwin();
+  }
+};
+
+std::string truncate_text(const std::string & text, int width) {
+  if (width <= 0) {
+    return "";
+  }
+  if (static_cast<int>(text.size()) <= width) {
+    return text;
+  }
+  if (width <= 3) {
+    return text.substr(0, static_cast<std::size_t>(width));
+  }
+  return text.substr(0, static_cast<std::size_t>(width - 3)) + "...";
+}
+
+std::string time_string(const builtin_interfaces::msg::Time & stamp) {
+  std::ostringstream stream;
+  stream << stamp.sec << "." << std::setw(3) << std::setfill('0') << (stamp.nanosec / 1000000U);
+  return stream.str();
+}
+
+std::string level_string(uint8_t level) {
+  switch (level) {
+    case LogMessage::DEBUG:
+      return "DEBUG";
+    case LogMessage::INFO:
+      return "INFO";
+    case LogMessage::WARN:
+      return "WARN";
+    case LogMessage::ERROR:
+      return "ERROR";
+    case LogMessage::FATAL:
+      return "FATAL";
+    default:
+      return "LOG";
+  }
+}
+
+int level_color(uint8_t level, bool selected) {
+  switch (level) {
+    case LogMessage::WARN:
+      return selected ? kColorSelection : kColorWarn;
+    case LogMessage::ERROR:
+      return selected ? kColorSelection : kColorError;
+    case LogMessage::FATAL:
+      return selected ? kColorFatal : kColorFatal;
+    case LogMessage::DEBUG:
+    case LogMessage::INFO:
+    default:
+      return selected ? kColorSelection : 0;
+  }
+}
+
+struct LogEntry {
+  builtin_interfaces::msg::Time stamp;
+  uint8_t level{0};
+  std::string source;
+  std::string message;
+  std::string file;
+  std::string function_name;
+  uint32_t line{0};
+};
+
+struct SourceEntry {
+  std::string name;
+  bool selected{false};
+};
+
+class LogViewerNode : public rclcpp::Node {
+public:
+  LogViewerNode()
+  : Node("log_viewer") {}
+
+  int run() {
+    NcursesSession ncurses_session;
+    refresh_sources();
+
+    bool running = true;
+    while (running && rclcpp::ok()) {
+      draw();
+      const int key = getch();
+      if (key == ERR) {
+        continue;
+      }
+      running = handle_key(key);
+    }
+
+    return 0;
+  }
+
+private:
+  static constexpr std::size_t kMaxLogs = 2000;
+
+  bool handle_key(int key) {
+    if (filter_prompt_open_) {
+      return handle_filter_prompt_key(key);
+    }
+    if (detail_popup_open_) {
+      return handle_detail_popup_key(key);
+    }
+
+    switch (key) {
+      case KEY_F(10):
+        return false;
+      case '\t':
+        focus_ = focus_ == PaneFocus::Sources ? PaneFocus::Logs : PaneFocus::Sources;
+        return true;
+      case KEY_F(4):
+        refresh_sources();
+        return true;
+      case KEY_F(5):
+        hide_unselected_ = !hide_unselected_;
+        log_scroll_ = 0;
+        selected_log_index_ = 0;
+        set_status(hide_unselected_ ? "Showing selected sources only." : "Showing all sources.");
+        return true;
+      case KEY_F(6):
+        cycle_minimum_level();
+        return true;
+      case '/':
+        filter_prompt_open_ = true;
+        filter_buffer_ = text_filter_;
+        set_status("Filter text: " + filter_buffer_);
+        return true;
+      default:
+        break;
+    }
+
+    if (focus_ == PaneFocus::Sources) {
+      return handle_source_key(key);
+    }
+    return handle_log_key(key);
+  }
+
+  bool handle_filter_prompt_key(int key) {
+    switch (key) {
+      case 27:
+        filter_prompt_open_ = false;
+        filter_buffer_.clear();
+        set_status("Filter unchanged.");
+        return true;
+      case '\n':
+      case KEY_ENTER:
+        text_filter_ = filter_buffer_;
+        filter_prompt_open_ = false;
+        filter_buffer_.clear();
+        selected_log_index_ = 0;
+        log_scroll_ = 0;
+        set_status(text_filter_.empty() ? "Text filter cleared." : "Text filter applied.");
+        return true;
+      case KEY_BACKSPACE:
+      case 127:
+      case '\b':
+        if (!filter_buffer_.empty()) {
+          filter_buffer_.pop_back();
+        }
+        set_status("Filter text: " + filter_buffer_);
+        return true;
+      default:
+        if (key >= 32 && key <= 126) {
+          filter_buffer_.push_back(static_cast<char>(key));
+          set_status("Filter text: " + filter_buffer_);
+        }
+        return true;
+    }
+  }
+
+  bool handle_detail_popup_key(int key) {
+    switch (key) {
+      case KEY_F(10):
+        return false;
+      case 27:
+      case '\n':
+      case KEY_ENTER:
+        detail_popup_open_ = false;
+        return true;
+      default:
+        return true;
+    }
+  }
+
+  bool handle_source_key(int key) {
+    const auto snapshot = source_snapshot();
+    clamp_source_selection(snapshot);
+
+    switch (key) {
+      case KEY_UP:
+      case 'k':
+        if (selected_source_index_ > 0) {
+          --selected_source_index_;
+        }
+        return true;
+      case KEY_DOWN:
+      case 'j':
+        if (selected_source_index_ + 1 < static_cast<int>(snapshot.size())) {
+          ++selected_source_index_;
+        }
+        return true;
+      case KEY_PPAGE:
+        selected_source_index_ = std::max(0, selected_source_index_ - page_step());
+        return true;
+      case KEY_NPAGE:
+        if (!snapshot.empty()) {
+          selected_source_index_ = std::min(static_cast<int>(snapshot.size()) - 1, selected_source_index_ + page_step());
+        }
+        return true;
+      case ' ':
+      case KEY_IC:
+        toggle_selected_source();
+        return true;
+      default:
+        return true;
+    }
+  }
+
+  bool handle_log_key(int key) {
+    const auto snapshot = filtered_logs_snapshot();
+    clamp_log_selection(snapshot);
+
+    switch (key) {
+      case KEY_UP:
+      case 'k':
+        if (selected_log_index_ > 0) {
+          --selected_log_index_;
+        }
+        return true;
+      case KEY_DOWN:
+      case 'j':
+        if (selected_log_index_ + 1 < static_cast<int>(snapshot.size())) {
+          ++selected_log_index_;
+        }
+        return true;
+      case KEY_PPAGE:
+        selected_log_index_ = std::max(0, selected_log_index_ - page_step());
+        return true;
+      case KEY_NPAGE:
+        if (!snapshot.empty()) {
+          selected_log_index_ = std::min(static_cast<int>(snapshot.size()) - 1, selected_log_index_ + page_step());
+        }
+        return true;
+      case '\n':
+      case KEY_ENTER:
+        open_detail_popup(snapshot);
+        return true;
+      default:
+        return true;
+    }
+  }
+
+  void cycle_minimum_level() {
+    switch (minimum_level_) {
+      case LogMessage::DEBUG:
+        minimum_level_ = LogMessage::INFO;
+        break;
+      case LogMessage::INFO:
+        minimum_level_ = LogMessage::WARN;
+        break;
+      case LogMessage::WARN:
+        minimum_level_ = LogMessage::ERROR;
+        break;
+      case LogMessage::ERROR:
+        minimum_level_ = LogMessage::FATAL;
+        break;
+      case LogMessage::FATAL:
+      default:
+        minimum_level_ = LogMessage::DEBUG;
+        break;
+    }
+    selected_log_index_ = 0;
+    log_scroll_ = 0;
+    set_status("Minimum level: " + level_string(minimum_level_) + ".");
+  }
+
+  int page_step() const {
+    int rows = 0;
+    int columns = 0;
+    getmaxyx(stdscr, rows, columns);
+    (void)columns;
+    return std::max(5, rows - 8);
+  }
+
+  void on_log_message(const LogMessage & message) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    LogEntry entry;
+    entry.stamp = message.stamp;
+    entry.level = message.level;
+    entry.source = message.name.empty() ? "<unknown>" : message.name;
+    entry.message = message.msg;
+    entry.file = message.file;
+    entry.function_name = message.function;
+    entry.line = message.line;
+    logs_.push_back(std::move(entry));
+    if (logs_.size() > kMaxLogs) {
+      logs_.pop_front();
+    }
+
+    if (sources_.find(message.name) == sources_.end()) {
+      sources_[message.name] = false;
+    }
+    last_message_time_ = Clock::now();
+  }
+
+  void refresh_sources() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto & log : logs_) {
+      if (sources_.find(log.source) == sources_.end()) {
+        sources_[log.source] = false;
+      }
+    }
+    set_status_locked("Loaded " + std::to_string(sources_.size()) + " log sources.");
+  }
+
+  std::vector<SourceEntry> source_snapshot() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<SourceEntry> snapshot;
+    snapshot.reserve(sources_.size());
+    for (const auto & [name, selected] : sources_) {
+      snapshot.push_back({name, selected});
+    }
+    return snapshot;
+  }
+
+  std::vector<LogEntry> filtered_logs_snapshot() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<LogEntry> snapshot;
+    snapshot.reserve(logs_.size());
+    const bool any_source_selected = std::any_of(
+      sources_.begin(), sources_.end(),
+      [](const auto & item) { return item.second; });
+
+    for (const auto & log : logs_) {
+      if (log.level < minimum_level_) {
+        continue;
+      }
+      if (hide_unselected_ && any_source_selected) {
+        const auto found = sources_.find(log.source);
+        if (found == sources_.end() || !found->second) {
+          continue;
+        }
+      }
+      if (!text_filter_.empty()) {
+        if (log.message.find(text_filter_) == std::string::npos &&
+          log.source.find(text_filter_) == std::string::npos &&
+          log.file.find(text_filter_) == std::string::npos &&
+          log.function_name.find(text_filter_) == std::string::npos)
+        {
+          continue;
+        }
+      }
+      snapshot.push_back(log);
+    }
+    return snapshot;
+  }
+
+  void toggle_selected_source() {
+    auto snapshot = source_snapshot();
+    clamp_source_selection(snapshot);
+    if (snapshot.empty() || selected_source_index_ < 0 || selected_source_index_ >= static_cast<int>(snapshot.size())) {
+      set_status("No source selected.");
+      return;
+    }
+
+    const std::string name = snapshot[static_cast<std::size_t>(selected_source_index_)].name;
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto found = sources_.find(name);
+    if (found == sources_.end()) {
+      return;
+    }
+    found->second = !found->second;
+    set_status_locked((found->second ? "Selected " : "Deselected ") + name + ".");
+  }
+
+  void open_detail_popup(const std::vector<LogEntry> & snapshot) {
+    clamp_log_selection(snapshot);
+    if (snapshot.empty() || selected_log_index_ < 0 || selected_log_index_ >= static_cast<int>(snapshot.size())) {
+      set_status("No log line selected.");
+      return;
+    }
+
+    detail_entry_ = snapshot[static_cast<std::size_t>(selected_log_index_)];
+    detail_popup_open_ = true;
+  }
+
+  void draw() {
+    erase();
+
+    int rows = 0;
+    int columns = 0;
+    getmaxyx(stdscr, rows, columns);
+    const int help_row = rows - 1;
+    const int status_row = rows - 2;
+    const int content_bottom = std::max(1, status_row - 1);
+
+    draw_box(0, 0, content_bottom, columns - 1);
+    mvprintw(0, 1, "Log Viewer ");
+
+    const int left_width = std::max(24, (columns - 2) / 4);
+    const int separator_x = 1 + left_width;
+    draw_sources_pane(1, 1, content_bottom - 1, separator_x - 1);
+    attron(COLOR_PAIR(kColorFrame));
+    mvvline(1, separator_x, ACS_VLINE, content_bottom - 1);
+    attroff(COLOR_PAIR(kColorFrame));
+    draw_logs_pane(1, separator_x + 1, content_bottom - 1, columns - 2);
+    draw_status_line(status_row, columns);
+    draw_help_line(help_row, columns);
+    if (detail_popup_open_) {
+      draw_detail_popup(rows, columns);
+    }
+
+    refresh();
+  }
+
+  void draw_box(int top, int left, int bottom, int right) const {
+    attron(COLOR_PAIR(kColorFrame));
+    mvaddch(top, left, ACS_ULCORNER);
+    mvaddch(top, right, ACS_URCORNER);
+    mvaddch(bottom, left, ACS_LLCORNER);
+    mvaddch(bottom, right, ACS_LRCORNER);
+    mvhline(top, left + 1, ACS_HLINE, right - left - 1);
+    mvhline(bottom, left + 1, ACS_HLINE, right - left - 1);
+    mvvline(top + 1, left, ACS_VLINE, bottom - top - 1);
+    mvvline(top + 1, right, ACS_VLINE, bottom - top - 1);
+    attroff(COLOR_PAIR(kColorFrame));
+  }
+
+  void draw_sources_pane(int top, int left, int bottom, int right) {
+    const auto snapshot = source_snapshot();
+    clamp_source_selection(snapshot);
+
+    const int width = right - left + 1;
+    const int visible_rows = std::max(1, bottom - top + 1);
+    if (selected_source_index_ < source_scroll_) {
+      source_scroll_ = selected_source_index_;
+    }
+    if (selected_source_index_ >= source_scroll_ + visible_rows - 1) {
+      source_scroll_ = std::max(0, selected_source_index_ - visible_rows + 2);
+    }
+
+    attron(COLOR_PAIR(kColorHeader));
+    mvprintw(top, left, "%-*s", width, "Sources");
+    attroff(COLOR_PAIR(kColorHeader));
+
+    const int first_row = source_scroll_;
+    const int last_row = std::min(static_cast<int>(snapshot.size()), first_row + visible_rows - 1);
+    for (int row = top + 1; row <= bottom; ++row) {
+      const bool has_item = first_row + (row - top - 1) < last_row;
+      const bool selected = has_item && (first_row + (row - top - 1) == selected_source_index_);
+      mvhline(row, left, ' ', width);
+      if (selected && focus_ == PaneFocus::Sources) {
+        mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      }
+      if (!has_item) {
+        continue;
+      }
+
+      const auto & entry = snapshot[static_cast<std::size_t>(first_row + (row - top - 1))];
+      const std::string label = std::string(entry.selected ? "* " : "  ") + entry.name;
+      const int color = selected && focus_ == PaneFocus::Sources ? kColorSelection : kColorSource;
+      attron(COLOR_PAIR(color));
+      mvprintw(row, left, "%-*s", width, truncate_text(label, width).c_str());
+      attroff(COLOR_PAIR(color));
+      if (selected && focus_ == PaneFocus::Sources) {
+        mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+        mvchgat(row, left, std::min(width, static_cast<int>(label.size())), A_NORMAL, color, nullptr);
+      }
+    }
+  }
+
+  void draw_logs_pane(int top, int left, int bottom, int right) {
+    const auto snapshot = filtered_logs_snapshot();
+    clamp_log_selection(snapshot);
+
+    const int width = right - left + 1;
+    const int visible_rows = std::max(1, bottom - top + 1);
+    const int time_width = 12;
+    const int level_width = 6;
+    const int source_width = std::max(16, width / 4);
+    const int message_width = std::max(10, width - time_width - level_width - source_width - 3);
+    const int sep_one_x = left + time_width;
+    const int sep_two_x = sep_one_x + 1 + level_width;
+    const int sep_three_x = sep_two_x + 1 + source_width;
+
+    if (selected_log_index_ < log_scroll_) {
+      log_scroll_ = selected_log_index_;
+    }
+    if (selected_log_index_ >= log_scroll_ + visible_rows - 1) {
+      log_scroll_ = std::max(0, selected_log_index_ - visible_rows + 2);
+    }
+
+    attron(COLOR_PAIR(kColorHeader));
+    mvprintw(top, left, "%-*s", time_width, "Time");
+    mvaddch(top, sep_one_x, ACS_VLINE);
+    mvprintw(top, sep_one_x + 1, "%-*s", level_width, "Level");
+    mvaddch(top, sep_two_x, ACS_VLINE);
+    mvprintw(top, sep_two_x + 1, "%-*s", source_width, "Source");
+    mvaddch(top, sep_three_x, ACS_VLINE);
+    mvprintw(top, sep_three_x + 1, "%-*s", message_width, "Message");
+    attroff(COLOR_PAIR(kColorHeader));
+
+    const int first_row = log_scroll_;
+    const int last_row = std::min(static_cast<int>(snapshot.size()), first_row + visible_rows - 1);
+    for (int row = top + 1; row <= bottom; ++row) {
+      const bool has_item = first_row + (row - top - 1) < last_row;
+      const bool selected = has_item && (first_row + (row - top - 1) == selected_log_index_);
+      mvhline(row, left, ' ', width);
+      if (selected && focus_ == PaneFocus::Logs) {
+        mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      }
+
+      const chtype separator = selected && focus_ == PaneFocus::Logs ? '|' : ACS_VLINE;
+      mvaddch(row, sep_one_x, separator);
+      mvaddch(row, sep_two_x, separator);
+      mvaddch(row, sep_three_x, separator);
+      if (!has_item) {
+        continue;
+      }
+
+      const auto & entry = snapshot[static_cast<std::size_t>(first_row + (row - top - 1))];
+      const int color = level_color(entry.level, selected && focus_ == PaneFocus::Logs);
+      if (color != 0) {
+        attron(COLOR_PAIR(color));
+      }
+      mvprintw(row, left, "%-*s", time_width, truncate_text(time_string(entry.stamp), time_width).c_str());
+      mvprintw(row, sep_one_x + 1, "%-*s", level_width, truncate_text(level_string(entry.level), level_width).c_str());
+      mvprintw(row, sep_two_x + 1, "%-*s", source_width, truncate_text(entry.source, source_width).c_str());
+      mvprintw(row, sep_three_x + 1, "%-*s", message_width, truncate_text(entry.message, message_width).c_str());
+      if (color != 0) {
+        attroff(COLOR_PAIR(color));
+      }
+      if (selected && focus_ == PaneFocus::Logs) {
+        mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+        mvaddch(row, sep_one_x, '|');
+        mvaddch(row, sep_two_x, '|');
+        mvaddch(row, sep_three_x, '|');
+        if (color != 0) {
+          mvchgat(row, left, time_width, A_NORMAL, color, nullptr);
+          mvchgat(row, sep_one_x + 1, level_width, A_NORMAL, color, nullptr);
+          mvchgat(row, sep_two_x + 1, source_width, A_NORMAL, color, nullptr);
+          mvchgat(row, sep_three_x + 1, message_width, A_NORMAL, color, nullptr);
+        }
+      }
+    }
+  }
+
+  void draw_status_line(int row, int columns) const {
+    attron(COLOR_PAIR(kColorStatus));
+    mvhline(row, 0, ' ', columns);
+    std::string line = status_line_;
+    if (filter_prompt_open_) {
+      line = "Filter text: " + filter_buffer_;
+    } else {
+      line += "  level>=" + level_string(minimum_level_);
+      if (!text_filter_.empty()) {
+        line += "  filter=\"" + text_filter_ + "\"";
+      }
+      line += "  follow=" + std::string(hide_unselected_ ? "selected" : "all");
+    }
+    mvprintw(row, 1, "%s", truncate_text(line, columns - 1).c_str());
+    attroff(COLOR_PAIR(kColorStatus));
+  }
+
+  void draw_help_line(int row, int columns) const {
+    attron(COLOR_PAIR(kColorHelp));
+    mvhline(row, 0, ' ', columns);
+    const std::string help =
+      "Tab Pane  Space Mark  Enter Details  F4 Refresh  F5 Hide Unselected  F6 Level  / Filter  F10 Exit";
+    mvprintw(row, 1, "%s", truncate_text(help, columns - 1).c_str());
+    attroff(COLOR_PAIR(kColorHelp));
+  }
+
+  void draw_detail_popup(int rows, int columns) const {
+    const int popup_width = std::min(columns - 6, 96);
+    const int popup_height = std::min(rows - 6, 12);
+    const int left = std::max(2, (columns - popup_width) / 2);
+    const int top = std::max(2, (rows - popup_height) / 2);
+    const int right = left + popup_width - 1;
+    const int bottom = top + popup_height - 1;
+
+    for (int row = top; row <= bottom; ++row) {
+      mvhline(row, left, ' ', popup_width);
+      mvchgat(row, left, popup_width, A_NORMAL, kColorPopup, nullptr);
+    }
+    draw_box(top, left, bottom, right);
+
+    const auto print_line = [&](int row, const std::string & label, const std::string & value) {
+      const std::string text = label + value;
+      mvprintw(row, left + 2, "%s", truncate_text(text, popup_width - 4).c_str());
+    };
+
+    print_line(top + 1, "time: ", time_string(detail_entry_.stamp));
+    print_line(top + 2, "level: ", level_string(detail_entry_.level));
+    print_line(top + 3, "source: ", detail_entry_.source);
+    print_line(top + 4, "file: ", detail_entry_.file);
+    print_line(top + 5, "function: ", detail_entry_.function_name);
+    print_line(top + 6, "line: ", std::to_string(detail_entry_.line));
+    print_line(top + 8, "message: ", detail_entry_.message);
+  }
+
+  void clamp_source_selection(const std::vector<SourceEntry> & snapshot) {
+    if (snapshot.empty()) {
+      selected_source_index_ = 0;
+      source_scroll_ = 0;
+      return;
+    }
+    selected_source_index_ = std::clamp(selected_source_index_, 0, static_cast<int>(snapshot.size()) - 1);
+  }
+
+  void clamp_log_selection(const std::vector<LogEntry> & snapshot) {
+    if (snapshot.empty()) {
+      selected_log_index_ = 0;
+      log_scroll_ = 0;
+      return;
+    }
+    selected_log_index_ = std::clamp(selected_log_index_, 0, static_cast<int>(snapshot.size()) - 1);
+  }
+
+  void set_status(const std::string & text) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    set_status_locked(text);
+  }
+
+  void set_status_locked(const std::string & text) const {
+    status_line_ = text;
+  }
+
+  mutable std::mutex mutex_;
+  rclcpp::Subscription<LogMessage>::SharedPtr log_subscription_;
+  std::deque<LogEntry> logs_;
+  std::map<std::string, bool> sources_;
+  PaneFocus focus_{PaneFocus::Logs};
+  int selected_source_index_{0};
+  int selected_log_index_{0};
+  int source_scroll_{0};
+  int log_scroll_{0};
+  bool hide_unselected_{false};
+  uint8_t minimum_level_{LogMessage::DEBUG};
+  std::string text_filter_;
+  bool filter_prompt_open_{false};
+  std::string filter_buffer_;
+  bool detail_popup_open_{false};
+  LogEntry detail_entry_;
+  mutable std::string status_line_{"Waiting for /rosout..."};
+  Clock::time_point last_message_time_{};
+
+public:
+  void initialize_subscription() {
+    log_subscription_ = this->create_subscription<LogMessage>(
+      "/rosout", rclcpp::QoS(rclcpp::KeepLast(200)),
+      [this](const LogMessage & message) { on_log_message(message); });
+  }
+};
+
+}  // namespace
+
+}  // namespace ros2_console_tools
+
+int main(int argc, char ** argv) {
+  rclcpp::init(argc, argv);
+  auto node = std::make_shared<ros2_console_tools::LogViewerNode>();
+  node->initialize_subscription();
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  std::thread spin_thread([&executor]() { executor.spin(); });
+
+  const int result = node->run();
+
+  executor.cancel();
+  if (spin_thread.joinable()) {
+    spin_thread.join();
+  }
+  rclcpp::shutdown();
+  return result;
+}
