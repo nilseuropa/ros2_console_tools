@@ -16,6 +16,7 @@
   <depend>rclcpp</depend>
   <depend>rosidl_typesupport_introspection_cpp</depend>
   <depend>tf2_msgs</depend>
+  <depend>urdf</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

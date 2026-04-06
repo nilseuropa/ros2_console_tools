@@ -21,6 +21,7 @@ find_package(rclcpp REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(rosidl_typesupport_introspection_cpp REQUIRED)
 find_package(tf2_msgs REQUIRED)
+find_package(urdf REQUIRED)
 
 add_executable(occupancy_grid_node src/occupancy_grid_node.cpp)
 ament_target_dependencies(occupancy_grid_node
@@ -149,6 +150,30 @@ target_include_directories(tf_monitor PRIVATE ${CURSES_INCLUDE_DIR} include)
 target_link_libraries(tf_monitor tf_monitor_lib)
 
 install(TARGETS tf_monitor_lib tf_monitor
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_library(urdf_inspector_lib
+  src/urdf_inspector_backend.cpp
+  src/urdf_inspector_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(urdf_inspector_lib
+  rclcpp
+  urdf
+)
+target_include_directories(urdf_inspector_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(urdf_inspector_lib ${NCURSESW_LIBRARY})
+
+add_executable(urdf_inspector src/urdf_inspector.cpp)
+ament_target_dependencies(urdf_inspector
+  rclcpp
+  urdf
+)
+target_include_directories(urdf_inspector PRIVATE ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(urdf_inspector urdf_inspector_lib)
+
+install(TARGETS urdf_inspector_lib urdf_inspector
   DESTINATION lib/${PROJECT_NAME}
 )
 
