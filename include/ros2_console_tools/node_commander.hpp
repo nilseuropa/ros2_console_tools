@@ -83,6 +83,7 @@ private:
   bool handle_search_key(int key);
   int page_step() const;
   bool launch_log_viewer();
+  bool launch_action_commander();
   bool launch_service_commander();
   bool launch_topic_monitor();
   bool launch_tf_monitor();

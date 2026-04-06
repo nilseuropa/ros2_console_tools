@@ -1,5 +1,6 @@
 #include "ros2_console_tools/node_commander.hpp"
 
+#include "ros2_console_tools/action_commander.hpp"
 #include "ros2_console_tools/log_viewer.hpp"
 #include "ros2_console_tools/tf_monitor.hpp"
 #include "ros2_console_tools/urdf_inspector.hpp"
@@ -103,12 +104,16 @@ bool NodeCommanderScreen::handle_key(int key) {
     case KEY_F(2):
       return launch_log_viewer();
     case KEY_F(3):
-      return launch_service_commander();
-    case KEY_F(4):
       return launch_topic_monitor();
+    case KEY_F(4):
+      return launch_selected_node_parameters();
     case KEY_F(5):
-      return launch_tf_monitor();
+      return launch_service_commander();
     case KEY_F(6):
+      return launch_action_commander();
+    case KEY_F(7):
+      return launch_tf_monitor();
+    case KEY_F(8):
       return launch_urdf_inspector();
     case '\t':
       focus_pane_ = focus_pane_ == NodeCommanderFocusPane::NodeList
@@ -252,6 +257,18 @@ bool NodeCommanderScreen::launch_service_commander() {
   return true;
 }
 
+bool NodeCommanderScreen::launch_action_commander() {
+  def_prog_mode();
+  endwin();
+  (void)run_action_commander_tool("", true);
+  resume_parent_screen();
+  {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Returned from action_commander.";
+  }
+  return true;
+}
+
 bool NodeCommanderScreen::launch_topic_monitor() {
   def_prog_mode();
   endwin();
@@ -381,12 +398,18 @@ void NodeCommanderScreen::draw() {
   draw_search_box(rows, columns, search_state_);
   if (help_popup_open_) {
     const int popup_width = std::min(columns - 8, 76);
-    const int popup_height = 11;
+    const int popup_height = 14;
     const int popup_left = std::max(2, (columns - popup_width) / 2);
     const int popup_top = std::max(1, (rows - popup_height) / 2);
     const int popup_right = popup_left + popup_width - 1;
     const int popup_bottom = popup_top + popup_height - 1;
+    const int inner_width = popup_width - 2;
 
+    for (int row = popup_top + 1; row < popup_bottom; ++row) {
+      attron(COLOR_PAIR(tui::kColorPopup));
+      mvhline(row, popup_left + 1, ' ', inner_width);
+      attroff(COLOR_PAIR(tui::kColorPopup));
+    }
     draw_box(popup_top, popup_left, popup_bottom, popup_right, kColorFrame);
     attron(COLOR_PAIR(kColorHeader));
     mvprintw(popup_top, popup_left + 2, "Node Commander Help ");
@@ -394,13 +417,27 @@ void NodeCommanderScreen::draw() {
 
     const int text_left = popup_left + 2;
     const int text_width = popup_width - 4;
-    mvprintw(popup_top + 2, text_left, "%-*s", text_width, "Enter: open selected node or selected detail item");
-    mvprintw(popup_top + 3, text_left, "%-*s", text_width, "Tab: switch between node list and detail pane");
-    mvprintw(popup_top + 4, text_left, "%-*s", text_width, "Alt+S: search nodes");
-    mvprintw(popup_top + 5, text_left, "%-*s", text_width, "F2: log_viewer    F3: service_commander");
-    mvprintw(popup_top + 6, text_left, "%-*s", text_width, "F4: topic_monitor F5: tf_monitor");
-    mvprintw(popup_top + 7, text_left, "%-*s", text_width, "F6: urdf_inspector");
-    mvprintw(popup_top + 8, text_left, "%-*s", text_width, "Esc/Enter/F1: close help");
+    constexpr int key_width = 10;
+    auto draw_help_item = [&](int row, const std::string & key, const std::string & description) {
+      mvhline(row, text_left, ' ', text_width);
+      attron(COLOR_PAIR(tui::kColorPopup) | A_BOLD);
+      mvprintw(row, text_left, "%-*s", key_width, key.c_str());
+      attroff(COLOR_PAIR(tui::kColorPopup) | A_BOLD);
+      attron(COLOR_PAIR(tui::kColorPopup));
+      mvaddnstr(row, text_left + key_width, description.c_str(), std::max(0, text_width - key_width));
+      attroff(COLOR_PAIR(tui::kColorPopup));
+    };
+    draw_help_item(popup_top + 2, "Enter", "open selected node or detail item");
+    draw_help_item(popup_top + 3, "Tab", "switch node list and detail pane");
+    draw_help_item(popup_top + 4, "Alt+S", "search nodes");
+    draw_help_item(popup_top + 5, "F2", "log_viewer");
+    draw_help_item(popup_top + 6, "F3", "topic_monitor");
+    draw_help_item(popup_top + 7, "F4", "parameter_commander");
+    draw_help_item(popup_top + 8, "F5", "service_commander");
+    draw_help_item(popup_top + 9, "F6", "action_commander");
+    draw_help_item(popup_top + 10, "F7", "tf_monitor");
+    draw_help_item(popup_top + 11, "F8", "urdf_inspector");
+    draw_help_item(popup_top + 12, "Esc/F1", "close help");
   }
   refresh();
 }
@@ -513,7 +550,7 @@ void NodeCommanderScreen::draw_status_line(int row, int columns) const {
 void NodeCommanderScreen::draw_help_line(int row, int columns) const {
   draw_help_bar(
     row, columns,
-    "F1 Help  F2 Logs  F3 Services  F4 Topics  F5 Transforms  F6 URDF  Enter Open  Tab Pane  Alt+S Search  F10 Exit");
+    "F1 Help  F2 Logs  F3 Topics  F4 Parameters  F5 Services  F6 Actions  F7 Transforms  F8 URDF  Enter Open  Tab Pane  Alt+S Search  F10 Exit");
 }
 
 }  // namespace ros2_console_tools

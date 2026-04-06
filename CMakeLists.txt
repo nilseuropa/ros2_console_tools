@@ -177,6 +177,30 @@ install(TARGETS service_commander_lib service_commander
 )
 
 target_link_libraries(node_commander_lib service_commander_lib)
+target_link_libraries(node_commander_lib action_commander_lib)
+
+add_library(action_commander_lib
+  src/action_commander_backend.cpp
+  src/action_commander_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(action_commander_lib
+  ament_index_cpp
+  rclcpp
+)
+target_include_directories(action_commander_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(action_commander_lib ${NCURSESW_LIBRARY})
+
+add_executable(action_commander src/action_commander.cpp)
+ament_target_dependencies(action_commander
+  rclcpp
+)
+target_include_directories(action_commander PRIVATE ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(action_commander action_commander_lib)
+
+install(TARGETS action_commander_lib action_commander
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 add_library(tf_monitor_lib
   src/tf_monitor_backend.cpp

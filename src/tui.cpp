@@ -558,6 +558,7 @@ void draw_help_bar_region(int row, int left, int width, const std::string & text
   attrset(A_NORMAL);
   mvhline(row, left, ' ', width);
 
+  const auto & help_key_color = current_theme()[kColorHelpKey];
   int column = left;
   const int right = left + width;
   bool first_block = true;
@@ -580,7 +581,6 @@ void draw_help_bar_region(int row, int left, int width, const std::string & text
       continue;
     }
 
-    const auto & help_key_color = current_theme()[kColorHelpKey];
     attron(COLOR_PAIR(kColorHelpKey) | help_key_color.attributes);
     mvaddnstr(row, column, key.c_str(), right - column);
     attroff(COLOR_PAIR(kColorHelpKey) | help_key_color.attributes);
@@ -616,6 +616,7 @@ void draw_help_bar_region(int row, int left, int width, const std::string & text
         break;
       }
     }
+
     first_block = false;
   }
 }

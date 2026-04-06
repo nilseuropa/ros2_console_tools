@@ -133,6 +133,45 @@ Current limitation:
 - request editing is currently intended for scalar fields
 - arrays and more advanced structured editing still need dedicated UI work
 
+### action_commander
+
+Binary:
+
+```bash
+ros2 run ros2_console_tools action_commander
+```
+
+Optional action argument:
+
+```bash
+ros2 run ros2_console_tools action_commander /navigate_to_pose
+```
+
+Purpose:
+
+- discover ROS 2 actions from the live graph
+- inspect action protocol endpoints
+- inspect server/client activity for an action
+
+Highlights:
+
+- action list view
+- action detail view
+- protocol breakdown for `send_goal`, `get_result`, `cancel_goal`, `feedback`, and `status`
+- server/client node lists derived from the graph
+
+Main files:
+
+- [include/ros2_console_tools/action_commander.hpp](/home/nils/dev_ws/src/ros2_console_tools/include/ros2_console_tools/action_commander.hpp)
+- [src/action_commander_backend.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/action_commander_backend.cpp)
+- [src/action_commander_screen.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/action_commander_screen.cpp)
+- [src/action_commander.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/action_commander.cpp)
+
+Current limitation:
+
+- v1 is inspection-focused
+- goal editing, goal sending, feedback streaming, and result retrieval still need dedicated action-client UI work
+
 ### log_viewer
 
 Binary:
