@@ -272,10 +272,24 @@ std::vector<std::string> UrdfInspectorBackend::link_details(const urdf::LinkCons
   }
 
   if (!link->visual_array.empty() && link->visual_array.front() && link->visual_array.front()->geometry) {
-    lines.push_back("visual geometry: " + geometry_type_name(link->visual_array.front()->geometry->type));
+    const auto & geometry = link->visual_array.front()->geometry;
+    std::string geometry_text = geometry_type_name(geometry->type);
+    if (geometry->type == urdf::Geometry::MESH) {
+      if (auto mesh = std::dynamic_pointer_cast<urdf::Mesh>(geometry)) {
+        geometry_text += "  " + mesh->filename;
+      }
+    }
+    lines.push_back("visual geometry: " + geometry_text);
   }
   if (!link->collision_array.empty() && link->collision_array.front() && link->collision_array.front()->geometry) {
-    lines.push_back("collision geometry: " + geometry_type_name(link->collision_array.front()->geometry->type));
+    const auto & geometry = link->collision_array.front()->geometry;
+    std::string geometry_text = geometry_type_name(geometry->type);
+    if (geometry->type == urdf::Geometry::MESH) {
+      if (auto mesh = std::dynamic_pointer_cast<urdf::Mesh>(geometry)) {
+        geometry_text += "  " + mesh->filename;
+      }
+    }
+    lines.push_back("collision geometry: " + geometry_text);
   }
 
   return lines;
