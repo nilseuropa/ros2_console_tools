@@ -536,15 +536,15 @@ std::string ParameterCommanderBackend::summary_value(const ParameterEntry & entr
   if (!entry.has_value) {
     return "<no value>";
   }
-  return parameter_value_to_string(entry.value);
+  return single_line(parameter_value_to_string(entry.value));
 }
 
 std::string ParameterCommanderBackend::descriptor_summary(const ParameterDescriptor & descriptor) const {
   if (!descriptor.description.empty()) {
-    return descriptor.description;
+    return single_line(descriptor.description);
   }
   if (!descriptor.additional_constraints.empty()) {
-    return descriptor.additional_constraints;
+    return single_line(descriptor.additional_constraints);
   }
   if (descriptor.read_only) {
     return "read-only";

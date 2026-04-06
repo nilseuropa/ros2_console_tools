@@ -200,6 +200,7 @@ int find_best_match(const std::vector<std::string> & labels, const std::string &
 Session::Session() {
   std::setlocale(LC_ALL, "");
   initscr();
+  set_escdelay(25);
   cbreak();
   noecho();
   keypad(stdscr, TRUE);

@@ -31,6 +31,31 @@ inline std::string trim(std::string value) {
   return value;
 }
 
+inline std::string single_line(std::string value) {
+  for (char & character : value) {
+    if (character == '\n' || character == '\r' || character == '\t') {
+      character = ' ';
+    }
+  }
+  value = trim(value);
+
+  std::string collapsed;
+  collapsed.reserve(value.size());
+  bool previous_space = false;
+  for (unsigned char character : value) {
+    if (std::isspace(character)) {
+      if (!previous_space) {
+        collapsed.push_back(' ');
+      }
+      previous_space = true;
+    } else {
+      collapsed.push_back(static_cast<char>(character));
+      previous_space = false;
+    }
+  }
+  return collapsed;
+}
+
 inline std::string parameter_type_name(uint8_t type) {
   switch (type) {
     case ParameterType::PARAMETER_BOOL:
