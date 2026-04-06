@@ -782,8 +782,8 @@ void LogViewerScreen::draw_help_line(int row, int columns) const {
     backend_->view_mode_ == LogViewerViewMode::CodeInspect
     ? "Esc Back  Up Down Scroll  PgUp PgDn Page  Home Top  End Bottom  F10 Exit"
     : backend_->view_mode_ == LogViewerViewMode::SourceLive
-    ? "Enter Details  Alt+S Search  Esc Back  F4 Refresh  F6 Level  / Filter  F10 Exit"
-    : "Tab Pane  Space Mark  Enter Live  Alt+S Search  F4 Refresh  F5 Hide Unselected  F6 Level  / Filter  F10 Exit";
+    ? "Enter Inspect  Alt+S Search  Esc Back  F4 Refresh  F6 Level  / Filter  F10 Exit"
+    : "Tab Pane  Space Mark  Enter Open  Alt+S Search  F4 Refresh  F5 Hide Unselected  F6 Level  / Filter  F10 Exit";
   draw_help_bar(row, columns, help);
 }
 

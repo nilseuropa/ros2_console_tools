@@ -624,11 +624,11 @@ void ParameterCommanderScreen::draw_status_line(int row, int columns) const {
 void ParameterCommanderScreen::draw_help_line(int row, int columns) const {
   std::string help;
   if (popup_open_) {
-    help = "F2 Save  F3 Load  Enter Save+Close  Esc Close  F10 Exit";
+    help = "F2 Save  F3 Reload  Enter Save+Close  Esc Close  F10 Exit";
   } else if (backend_->current_view_ == ParameterCommanderViewMode::NodeList) {
-    help = "Enter Select Node  Alt+S Search  F4 Refresh Nodes  F10 Exit";
+    help = "Enter Open  Alt+S Search  F4 Refresh  F10 Exit";
   } else {
-    help = "Enter Edit  Alt+S Search  F3 Refresh Param  F4 Refresh All  Esc Nodes  F10 Exit";
+    help = "Enter Edit  Alt+S Search  F3 Refresh  F4 Refresh All  Esc Back  F10 Exit";
   }
   draw_help_bar(row, columns, truncate_parameter_line(help, columns));
 }

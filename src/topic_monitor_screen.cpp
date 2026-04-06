@@ -430,8 +430,8 @@ void TopicMonitorScreen::draw_status_line(int row, int columns) const {
 void TopicMonitorScreen::draw_help_line(int row, int columns) const {
   const std::string help =
     backend_->view_mode_ == TopicMonitorViewMode::TopicDetail
-    ? "Enter Details  Esc Topics  F4 Refresh  F10 Exit"
-    : "Enter Details  Alt+S Search  Space/Ins Monitor  F4 Refresh  F5 Filter  F10 Exit";
+    ? "Esc Back  F4 Refresh  F10 Exit"
+    : "Enter Inspect  Alt+S Search  Space Mark  F4 Refresh  F5 Filter  F10 Exit";
   draw_help_bar(row, columns, help);
 }
 

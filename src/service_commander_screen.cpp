@@ -297,7 +297,7 @@ void ServiceCommanderScreen::draw_status_line(int row, int columns) const {
 void ServiceCommanderScreen::draw_help_line(int row, int columns) const {
   const std::string help =
     backend_->view_mode_ == ServiceCommanderViewMode::ServiceDetail
-    ? "F2 Call  F3 Reset Request  F4 Refresh  Esc Services  F10 Exit"
+    ? "F2 Call  F3 Reset  F4 Refresh  Esc Back  F10 Exit"
     : "Enter Inspect  Alt+S Search  F4 Refresh  F10 Exit";
   draw_help_bar(row, columns, truncate_text(help, columns - 1));
 }
