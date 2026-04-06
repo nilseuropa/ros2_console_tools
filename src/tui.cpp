@@ -10,10 +10,18 @@ namespace ros2_console_tools::tui {
 
 namespace {
 
+Theme g_theme = make_default_theme();
+
 struct HelpBlock {
   std::string key;
   std::string label;
 };
+
+void set_color_role(
+  Theme & theme, int role, short foreground, short background, int attributes = A_NORMAL)
+{
+  theme[static_cast<std::size_t>(role)] = ThemeColor{foreground, background, attributes};
+}
 
 std::string trim(const std::string & text) {
   std::size_t start = 0;
@@ -61,26 +69,51 @@ void initialize_theme() {
 
   start_color();
   use_default_colors();
-  init_pair(kColorFrame, COLOR_CYAN, -1);
-  init_pair(kColorTitle, COLOR_WHITE, -1);
-  init_pair(kColorHeader, COLOR_YELLOW, -1);
-  init_pair(kColorSelection, COLOR_BLACK, COLOR_YELLOW);
-  init_pair(kColorStatus, COLOR_GREEN, -1);
-  init_pair(kColorHelp, COLOR_BLACK, COLOR_CYAN);
-  init_pair(kColorPopup, COLOR_WHITE, -1);
-  init_pair(kColorInput, COLOR_YELLOW, -1);
-  init_pair(kColorDirty, COLOR_RED, -1);
-  init_pair(kColorCursor, COLOR_BLACK, COLOR_YELLOW);
-  init_pair(kColorPositive, COLOR_GREEN, -1);
-  init_pair(kColorPositiveSelection, COLOR_GREEN, COLOR_YELLOW);
-  init_pair(kColorWarn, COLOR_YELLOW, -1);
-  init_pair(kColorError, COLOR_RED, -1);
-  init_pair(kColorFatal, COLOR_RED, COLOR_YELLOW);
-  init_pair(kColorAccent, COLOR_CYAN, -1);
-  init_pair(kColorHelpKey, COLOR_BLACK, COLOR_YELLOW);
+  for (int role = 1; role < kThemeColorCount; ++role) {
+    const auto & color = g_theme[static_cast<std::size_t>(role)];
+    init_pair(role, color.foreground, color.background);
+  }
 }
 
 }  // namespace
+
+Theme make_default_theme() {
+  Theme theme{};
+  theme[0] = ThemeColor{};
+  set_color_role(theme, kColorFrame, COLOR_CYAN, -1);
+  set_color_role(theme, kColorTitle, COLOR_WHITE, -1);
+  set_color_role(theme, kColorHeader, COLOR_YELLOW, -1);
+  set_color_role(theme, kColorSelection, COLOR_BLACK, COLOR_YELLOW);
+  set_color_role(theme, kColorStatus, COLOR_GREEN, -1);
+  set_color_role(theme, kColorHelp, COLOR_BLACK, COLOR_CYAN);
+  set_color_role(theme, kColorPopup, COLOR_WHITE, -1);
+  set_color_role(theme, kColorInput, COLOR_YELLOW, -1);
+  set_color_role(theme, kColorDirty, COLOR_RED, -1);
+  set_color_role(theme, kColorCursor, COLOR_BLACK, COLOR_YELLOW);
+  set_color_role(theme, kColorPositive, COLOR_GREEN, -1);
+  set_color_role(theme, kColorPositiveSelection, COLOR_GREEN, COLOR_YELLOW);
+  set_color_role(theme, kColorWarn, COLOR_YELLOW, -1);
+  set_color_role(theme, kColorError, COLOR_RED, -1);
+  set_color_role(theme, kColorFatal, COLOR_RED, COLOR_YELLOW);
+  set_color_role(theme, kColorAccent, COLOR_CYAN, -1);
+  set_color_role(theme, kColorHelpKey, COLOR_BLACK, COLOR_YELLOW, A_BOLD);
+  return theme;
+}
+
+const Theme & current_theme() {
+  return g_theme;
+}
+
+void set_theme(const Theme & theme) {
+  g_theme = theme;
+  if (!has_colors()) {
+    return;
+  }
+  for (int role = 1; role < kThemeColorCount; ++role) {
+    const auto & color = g_theme[static_cast<std::size_t>(role)];
+    init_pair(role, color.foreground, color.background);
+  }
+}
 
 Session::Session() {
   std::setlocale(LC_ALL, "");
@@ -137,7 +170,8 @@ void draw_text_vline(int row, int col, int count) {
 }
 
 void draw_box(int top, int left, int bottom, int right, int color_pair) {
-  attron(COLOR_PAIR(color_pair));
+  const auto & color = current_theme()[static_cast<std::size_t>(color_pair)];
+  attron(COLOR_PAIR(color_pair) | color.attributes);
   draw_box_char(top, left, WACS_ULCORNER, '+');
   draw_box_char(top, right, WACS_URCORNER, '+');
   draw_box_char(bottom, left, WACS_LLCORNER, '+');
@@ -146,19 +180,24 @@ void draw_box(int top, int left, int bottom, int right, int color_pair) {
   draw_text_hline(bottom, left + 1, right - left - 1);
   draw_text_vline(top + 1, left, bottom - top - 1);
   draw_text_vline(top + 1, right, bottom - top - 1);
-  attroff(COLOR_PAIR(color_pair));
+  attroff(COLOR_PAIR(color_pair) | color.attributes);
 }
 
 void draw_bar(int row, int columns, const std::string & text, int color_pair, int left_padding) {
-  attron(COLOR_PAIR(color_pair));
+  const auto & color = current_theme()[static_cast<std::size_t>(color_pair)];
+  attron(COLOR_PAIR(color_pair) | color.attributes);
   mvhline(row, 0, ' ', columns);
   const int content_width = std::max(0, columns - left_padding);
   mvaddnstr(row, left_padding, truncate_text(text, content_width).c_str(), content_width);
-  attroff(COLOR_PAIR(color_pair));
+  attroff(COLOR_PAIR(color_pair) | color.attributes);
 }
 
 void draw_status_bar(int row, int columns, const std::string & text) {
-  draw_bar(row, columns, text, kColorStatus, 1);
+  const auto & color = current_theme()[kColorStatus];
+  attron(COLOR_PAIR(kColorStatus) | color.attributes);
+  mvhline(row, 0, ' ', columns);
+  mvaddnstr(row, 1, truncate_text(text, std::max(0, columns - 1)).c_str(), std::max(0, columns - 1));
+  attroff(COLOR_PAIR(kColorStatus) | color.attributes);
 }
 
 void draw_help_bar(int row, int columns, const std::string & text) {
@@ -186,9 +225,10 @@ void draw_help_bar(int row, int columns, const std::string & text) {
       continue;
     }
 
-    attron(COLOR_PAIR(kColorHelpKey) | A_BOLD);
+    const auto & help_key_color = current_theme()[kColorHelpKey];
+    attron(COLOR_PAIR(kColorHelpKey) | help_key_color.attributes);
     mvaddnstr(row, column, key.c_str(), columns - column);
-    attroff(COLOR_PAIR(kColorHelpKey) | A_BOLD);
+    attroff(COLOR_PAIR(kColorHelpKey) | help_key_color.attributes);
     column += static_cast<int>(key.size());
     if (column >= columns) {
       break;

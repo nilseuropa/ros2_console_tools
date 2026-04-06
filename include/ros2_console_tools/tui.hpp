@@ -3,6 +3,7 @@
 
 #include <ncursesw/ncurses.h>
 
+#include <array>
 #include <string>
 
 namespace ros2_console_tools::tui {
@@ -27,6 +28,16 @@ enum ColorPairId {
   kColorHelpKey = 17,
 };
 
+constexpr int kThemeColorCount = kColorHelpKey + 1;
+
+struct ThemeColor {
+  short foreground{-1};
+  short background{-1};
+  int attributes{A_NORMAL};
+};
+
+using Theme = std::array<ThemeColor, kThemeColorCount>;
+
 class Session {
 public:
   Session();
@@ -35,6 +46,10 @@ public:
   Session(const Session &) = delete;
   Session & operator=(const Session &) = delete;
 };
+
+Theme make_default_theme();
+const Theme & current_theme();
+void set_theme(const Theme & theme);
 
 std::string truncate_text(const std::string & text, int width);
 
