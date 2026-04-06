@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <clocale>
+#include <filesystem>
 #include <fstream>
 #include <langinfo.h>
 #include <map>
@@ -334,7 +335,15 @@ bool use_unicode_line_drawing() {
 }
 
 std::string default_theme_config_path() {
-  return ament_index_cpp::get_package_share_directory("ros2_console_tools") + "/config/tui_theme.yaml";
+  const std::string installed =
+    ament_index_cpp::get_package_share_directory("ros2_console_tools") + "/config/tui_theme.yaml";
+  if (std::filesystem::exists(installed)) {
+    return installed;
+  }
+
+  const std::filesystem::path source_fallback =
+    std::filesystem::path(__FILE__).parent_path().parent_path() / "config" / "tui_theme.yaml";
+  return source_fallback.string();
 }
 
 bool load_theme_from_file(const std::string & path, std::string * error) {

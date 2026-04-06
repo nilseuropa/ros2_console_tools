@@ -192,8 +192,8 @@ install(DIRECTORY include/
   DESTINATION include
 )
 
-install(DIRECTORY config/
-  DESTINATION share/${PROJECT_NAME}
+install(FILES config/tui_theme.yaml
+  DESTINATION share/${PROJECT_NAME}/config
 )
 
 ament_package()

@@ -1,6 +1,6 @@
 tui_theme:
   frame:
-    foreground: cyan
+    foreground: yellow
     background: default
     attributes: []
   title:
