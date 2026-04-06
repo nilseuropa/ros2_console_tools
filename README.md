@@ -1,18 +1,12 @@
-# ros2_console_tools
+## ros2_console_tools
 
 `ros2_console_tools` is a terminal-first toolbox for ROS 2 runtime inspection and operations.
 
 The package contains several standalone ncurses-based tools with a shared TUI layer and a common architectural pattern, plus one older renderer node that does not follow that structure yet.
 
-## Goals
+# Node Commander
 
-- provide practical ROS 2 operator tools in the terminal
-- keep behavior consistent across tools
-- allow each tool to run standalone today
-
-## Tools
-
-### node_commander
+![](doc/ros2_console_tools_demo.gif)
 
 Binary:
 
@@ -39,6 +33,8 @@ Main files:
 - [src/node_commander_backend.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/node_commander_backend.cpp)
 - [src/node_commander_screen.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/node_commander_screen.cpp)
 - [src/node_commander.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/node_commander.cpp)
+
+## Tools
 
 ### parameter_commander
 
