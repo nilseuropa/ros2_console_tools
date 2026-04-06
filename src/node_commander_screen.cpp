@@ -35,6 +35,7 @@ using tui::draw_text_vline;
 using tui::find_best_match;
 using tui::handle_search_input;
 using tui::is_alt_binding;
+using tui::apply_role_chgat;
 using tui::SearchInputResult;
 using tui::start_search;
 using tui::theme_attr;
@@ -427,7 +428,7 @@ void NodeCommanderScreen::draw_node_list(int top, int left, int bottom, int righ
     const bool selected = has_item && (first_row + (row_y - top - 1) == backend_->selected_index_);
     mvhline(row_y, left, ' ', width);
     if (selected) {
-      mvchgat(row_y, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row_y, left, width, kColorSelection);
     }
     if (!has_item) {
       continue;
@@ -436,7 +437,7 @@ void NodeCommanderScreen::draw_node_list(int top, int left, int bottom, int righ
     const auto & entry = backend_->node_entries_[static_cast<std::size_t>(first_row + (row_y - top - 1))];
     mvprintw(row_y, left, "%-*s", width, truncate_text(entry, width).c_str());
     if (selected) {
-      mvchgat(row_y, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row_y, left, width, kColorSelection);
     }
   }
 }
@@ -472,7 +473,7 @@ void NodeCommanderScreen::draw_detail_pane(int top, int left, int bottom, int ri
     const bool selected = focus_pane_ == NodeCommanderFocusPane::DetailPane && index == detail_selected_index_;
     mvhline(row_y, left, ' ', width);
     if (selected) {
-      mvchgat(row_y, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row_y, left, width, kColorSelection);
     }
     if (line.is_header) {
       attron(theme_attr(kColorHeader));
@@ -486,7 +487,7 @@ void NodeCommanderScreen::draw_detail_pane(int top, int left, int bottom, int ri
       mvprintw(row_y, left, "%-*s", width, truncate_text(line.text, width).c_str());
     }
     if (selected) {
-      mvchgat(row_y, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row_y, left, width, kColorSelection);
     }
   }
   for (; row_y <= bottom; ++row_y) {

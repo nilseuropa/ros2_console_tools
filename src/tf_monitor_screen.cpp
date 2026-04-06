@@ -42,6 +42,7 @@ using tui::draw_help_bar;
 using tui::draw_help_bar_region;
 using tui::draw_search_box;
 using tui::draw_status_bar;
+using tui::apply_role_chgat;
 using tui::find_best_match;
 using tui::handle_search_input;
 using tui::is_alt_binding;
@@ -230,7 +231,7 @@ void TfMonitorScreen::draw_tree_pane(int top, int left, int bottom, int right) {
 
     mvhline(row, left, ' ', width);
     if (selected) {
-      mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row, left, width, kColorSelection);
     }
     draw_box_char(row, sep_one_x, WACS_VLINE, '|');
 
@@ -258,7 +259,7 @@ void TfMonitorScreen::draw_tree_pane(int top, int left, int bottom, int right) {
     }
 
     if (selected) {
-      mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row, left, width, kColorSelection);
       mvaddch(row, sep_one_x, '|');
     }
   }

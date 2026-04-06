@@ -48,6 +48,7 @@ using tui::draw_search_box;
 using tui::draw_status_bar;
 using tui::draw_text_hline;
 using tui::draw_text_vline;
+using tui::apply_role_chgat;
 using tui::find_best_match;
 using tui::handle_search_input;
 using tui::is_alt_binding;
@@ -425,22 +426,22 @@ void ParameterCommanderScreen::draw_parameter_list(int top, int left, int bottom
     const bool is_selected = entry_index == backend_->selected_parameter_item_index_;
 
     if (is_selected) {
-      attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+      attron(theme_attr(kColorSelection));
     }
     mvhline(row_y, left, ' ', width);
     if (is_selected) {
-      attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
+      attroff(theme_attr(kColorSelection));
     }
     if (entry_index >= static_cast<int>(items.size())) {
       if (is_selected) {
-        attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+        attron(theme_attr(kColorSelection));
       } else {
         attron(COLOR_PAIR(kColorFrame));
       }
       draw_box_char(row_y, separator_one_x, WACS_VLINE, '|');
       draw_box_char(row_y, separator_two_x, WACS_VLINE, '|');
       if (is_selected) {
-        attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
+        attroff(theme_attr(kColorSelection));
       } else {
         attroff(COLOR_PAIR(kColorFrame));
       }
@@ -449,20 +450,20 @@ void ParameterCommanderScreen::draw_parameter_list(int top, int left, int bottom
     const auto & item = items[static_cast<std::size_t>(entry_index)];
 
     if (is_selected) {
-      attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+      attron(theme_attr(kColorSelection));
     } else if (item.is_namespace) {
       attron(COLOR_PAIR(kColorFrame) | A_BOLD);
     }
     draw_parameter_name_cell(row_y, left, name_width, item);
     if (is_selected) {
-      attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+      attron(theme_attr(kColorSelection));
     } else {
       attron(COLOR_PAIR(kColorFrame));
     }
     draw_box_char(row_y, separator_one_x, WACS_VLINE, '|');
     draw_box_char(row_y, separator_two_x, WACS_VLINE, '|');
     if (is_selected) {
-      attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
+      attroff(theme_attr(kColorSelection));
     } else {
       attroff(COLOR_PAIR(kColorFrame));
     }
@@ -477,11 +478,11 @@ void ParameterCommanderScreen::draw_parameter_list(int top, int left, int bottom
       pad_column(item.is_namespace ? "" : backend_->descriptor_summary(item.entry->descriptor), desc_width).c_str(),
       desc_width);
     if (is_selected) {
-      mvchgat(row_y, left, width, A_BOLD, kColorSelection, nullptr);
-      attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+      apply_role_chgat(row_y, left, width, kColorSelection);
+      attron(theme_attr(kColorSelection));
       draw_box_char(row_y, separator_one_x, WACS_VLINE, '|');
       draw_box_char(row_y, separator_two_x, WACS_VLINE, '|');
-      attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
+      attroff(theme_attr(kColorSelection));
     } else if (item.is_namespace) {
       attroff(COLOR_PAIR(kColorFrame) | A_BOLD);
     }
@@ -531,11 +532,11 @@ void ParameterCommanderScreen::draw_node_list(int top, int left, int bottom, int
     }
     const std::string rendered = pad_column(backend_->node_entries_[static_cast<std::size_t>(entry_index)], width);
     if (entry_index == backend_->selected_node_index_) {
-      attron(COLOR_PAIR(kColorSelection) | A_BOLD);
+      attron(theme_attr(kColorSelection));
     }
     mvaddnstr(top + row, left, rendered.c_str(), width);
     if (entry_index == backend_->selected_node_index_) {
-      attroff(COLOR_PAIR(kColorSelection) | A_BOLD);
+      attroff(theme_attr(kColorSelection));
     }
   }
 }

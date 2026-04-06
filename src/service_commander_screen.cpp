@@ -48,6 +48,7 @@ using tui::draw_search_box;
 using tui::draw_status_bar;
 using tui::draw_text_hline;
 using tui::draw_text_vline;
+using tui::apply_role_chgat;
 using tui::find_best_match;
 using tui::handle_search_input;
 using tui::is_alt_binding;
@@ -340,7 +341,7 @@ void ServiceCommanderScreen::draw_service_list(int top, int left, int bottom, in
 
     mvhline(row, left, ' ', width);
     if (selected) {
-      mvchgat(row, left, width, A_NORMAL, tui::kColorSelection, nullptr);
+      apply_role_chgat(row, left, width, tui::kColorSelection);
     }
     draw_box_char(row, separator_x, WACS_VLINE, '|');
     if (!has_item) {
@@ -351,7 +352,7 @@ void ServiceCommanderScreen::draw_service_list(int top, int left, int bottom, in
     mvprintw(row, left, "%-*s", name_width, truncate_text(entry.name, name_width).c_str());
     mvprintw(row, separator_x + 1, "%-*s", type_width, truncate_text(entry.type, type_width).c_str());
     if (selected) {
-      mvchgat(row, left, width, A_NORMAL, tui::kColorSelection, nullptr);
+      apply_role_chgat(row, left, width, tui::kColorSelection);
       mvaddch(row, separator_x, '|');
     }
   }
@@ -409,7 +410,7 @@ void ServiceCommanderScreen::draw_service_detail(int top, int left, int bottom, 
     const bool selected = has_item && (first_row + (row_y - top - 1) == backend_->selected_request_index_);
     mvhline(row_y, left, ' ', request_width);
     if (selected) {
-      mvchgat(row_y, left, request_width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row_y, left, request_width, kColorSelection);
     }
     if (!has_item) {
       continue;
@@ -421,7 +422,7 @@ void ServiceCommanderScreen::draw_service_detail(int top, int left, int bottom, 
     }
     mvprintw(row_y, left, "%-*s", request_width, truncate_text(line, request_width).c_str());
     if (selected) {
-      mvchgat(row_y, left, request_width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row_y, left, request_width, kColorSelection);
     }
   }
 

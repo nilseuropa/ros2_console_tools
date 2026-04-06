@@ -215,11 +215,41 @@ const Theme & current_theme() {
   return g_theme;
 }
 
+int monochrome_fallback_attr(int role) {
+  switch (role) {
+    case kColorSelection:
+    case kColorPositiveSelection:
+    case kColorFatal:
+    case kColorCursor:
+      return A_REVERSE;
+    default:
+      return A_NORMAL;
+  }
+}
+
 int theme_attr(int role) {
   if (role <= 0 || role >= kThemeColorCount) {
     return A_NORMAL;
   }
-  return COLOR_PAIR(role) | g_theme[static_cast<std::size_t>(role)].attributes;
+  const int attributes =
+    g_theme[static_cast<std::size_t>(role)].attributes |
+    (!has_colors() ? monochrome_fallback_attr(role) : A_NORMAL);
+  return (has_colors() ? COLOR_PAIR(role) : 0) | attributes;
+}
+
+void apply_role_chgat(int row, int col, int count, int role, int extra_attributes) {
+  if (count <= 0) {
+    return;
+  }
+  if (role <= 0 || role >= kThemeColorCount) {
+    mvchgat(row, col, count, extra_attributes, 0, nullptr);
+    return;
+  }
+  const int attributes =
+    g_theme[static_cast<std::size_t>(role)].attributes |
+    (!has_colors() ? monochrome_fallback_attr(role) : A_NORMAL) |
+    extra_attributes;
+  mvchgat(row, col, count, attributes, has_colors() ? role : 0, nullptr);
 }
 
 void set_theme(const Theme & theme) {

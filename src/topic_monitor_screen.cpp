@@ -46,6 +46,7 @@ using tui::draw_text_vline;
 using tui::find_best_match;
 using tui::handle_search_input;
 using tui::is_alt_binding;
+using tui::apply_role_chgat;
 using tui::SearchInputResult;
 using tui::start_search;
 using tui::theme_attr;
@@ -354,7 +355,7 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
 
     mvhline(row, left, ' ', width);
     if (selected) {
-      mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row, left, width, kColorSelection);
     }
     draw_box_char(row, sep_one_x, WACS_VLINE, '|');
     draw_box_char(row, sep_two_x, WACS_VLINE, '|');
@@ -376,11 +377,11 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
         attroff(COLOR_PAIR(text_color));
       }
       if (selected) {
-        mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+        apply_role_chgat(row, left, width, kColorSelection);
         draw_box_char(row, sep_one_x, WACS_VLINE, '|');
         draw_box_char(row, sep_two_x, WACS_VLINE, '|');
         draw_box_char(row, sep_three_x, WACS_VLINE, '|');
-        mvchgat(row, left, topic_width, A_NORMAL, kColorSelection, nullptr);
+        apply_role_chgat(row, left, topic_width, kColorSelection);
       }
       continue;
     }
@@ -407,15 +408,15 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
       attroff(COLOR_PAIR(text_color));
     }
     if (selected) {
-      mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row, left, width, kColorSelection);
       mvaddch(row, sep_one_x, '|');
       mvaddch(row, sep_two_x, '|');
       mvaddch(row, sep_three_x, '|');
       if (text_color != 0) {
-        mvchgat(row, left, topic_width, A_NORMAL, text_color, nullptr);
-        mvchgat(row, sep_one_x + 1, avg_width, A_NORMAL, text_color, nullptr);
-        mvchgat(row, sep_two_x + 1, minmax_width, A_NORMAL, text_color, nullptr);
-        mvchgat(row, sep_three_x + 1, bandwidth_width, A_NORMAL, text_color, nullptr);
+        apply_role_chgat(row, left, topic_width, text_color);
+        apply_role_chgat(row, sep_one_x + 1, avg_width, text_color);
+        apply_role_chgat(row, sep_two_x + 1, minmax_width, text_color);
+        apply_role_chgat(row, sep_three_x + 1, bandwidth_width, text_color);
       }
     }
   }
@@ -453,7 +454,7 @@ void TopicMonitorScreen::draw_topic_detail(int top, int left, int bottom, int ri
 
     mvhline(row, left, ' ', width);
     if (selected) {
-      mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row, left, width, kColorSelection);
     }
     draw_box_char(row, separator_x, WACS_VLINE, '|');
 
@@ -468,7 +469,7 @@ void TopicMonitorScreen::draw_topic_detail(int top, int left, int bottom, int ri
     mvprintw(row, separator_x + 1, "%-*s", value_width, truncate_text(entry.value, value_width).c_str());
 
     if (selected) {
-      mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row, left, width, kColorSelection);
       draw_box_char(row, separator_x, WACS_VLINE, '|');
     }
   }

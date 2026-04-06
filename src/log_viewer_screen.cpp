@@ -56,6 +56,7 @@ using tui::draw_status_bar;
 using tui::draw_help_bar;
 using tui::draw_help_bar_region;
 using tui::draw_text_vline;
+using tui::apply_role_chgat;
 using tui::find_best_match;
 using tui::handle_search_input;
 using tui::is_alt_binding;
@@ -549,7 +550,7 @@ void LogViewerScreen::draw_code_line(
 {
   mvhline(row, left, ' ', width);
   if (highlight) {
-    mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+    apply_role_chgat(row, left, width, kColorSelection);
   }
 
   const int line_number_width = std::max(4, static_cast<int>(std::to_string(
@@ -564,7 +565,7 @@ void LogViewerScreen::draw_code_line(
       row, left + static_cast<int>(line_prefix.size()),
       truncate_text(line, width - static_cast<int>(line_prefix.size())).c_str(),
       width - static_cast<int>(line_prefix.size()));
-    mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+    apply_role_chgat(row, left, width, kColorSelection);
     return;
   }
 
@@ -640,7 +641,7 @@ void LogViewerScreen::draw_sources_pane(int top, int left, int bottom, int right
     const bool selected = has_item && (first_row + (row - top - 1) == backend_->selected_source_index_);
     mvhline(row, left, ' ', width);
     if (selected && backend_->focus_ == PaneFocus::Sources) {
-      mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row, left, width, kColorSelection);
     }
     if (!has_item) {
       continue;
@@ -653,8 +654,8 @@ void LogViewerScreen::draw_sources_pane(int top, int left, int bottom, int right
     mvprintw(row, left, "%-*s", width, truncate_text(label, width).c_str());
     attroff(COLOR_PAIR(color));
     if (selected && backend_->focus_ == PaneFocus::Sources) {
-      mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
-      mvchgat(row, left, std::min(width, static_cast<int>(label.size())), A_NORMAL, color, nullptr);
+      apply_role_chgat(row, left, width, kColorSelection);
+      apply_role_chgat(row, left, std::min(width, static_cast<int>(label.size())), color);
     }
   }
 }
@@ -697,7 +698,7 @@ void LogViewerScreen::draw_logs_pane(int top, int left, int bottom, int right) {
     const bool selected = has_item && (first_row + (row - top - 1) == backend_->selected_log_index_);
     mvhline(row, left, ' ', width);
     if (selected && backend_->focus_ == PaneFocus::Logs) {
-      mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row, left, width, kColorSelection);
     }
 
     draw_box_char(row, sep_one_x, WACS_VLINE, '|');
@@ -720,15 +721,15 @@ void LogViewerScreen::draw_logs_pane(int top, int left, int bottom, int right) {
       attroff(COLOR_PAIR(color));
     }
     if (selected && backend_->focus_ == PaneFocus::Logs) {
-      mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row, left, width, kColorSelection);
       draw_box_char(row, sep_one_x, WACS_VLINE, '|');
       draw_box_char(row, sep_two_x, WACS_VLINE, '|');
       draw_box_char(row, sep_three_x, WACS_VLINE, '|');
       if (color != 0) {
-        mvchgat(row, left, time_width, A_NORMAL, color, nullptr);
-        mvchgat(row, sep_one_x + 1, level_width, A_NORMAL, color, nullptr);
-        mvchgat(row, sep_two_x + 1, source_width, A_NORMAL, color, nullptr);
-        mvchgat(row, sep_three_x + 1, message_width, A_NORMAL, color, nullptr);
+        apply_role_chgat(row, left, time_width, color);
+        apply_role_chgat(row, sep_one_x + 1, level_width, color);
+        apply_role_chgat(row, sep_two_x + 1, source_width, color);
+        apply_role_chgat(row, sep_three_x + 1, message_width, color);
       }
     }
   }
@@ -758,7 +759,7 @@ void LogViewerScreen::draw_live_source_pane(int top, int left, int bottom, int r
     const bool selected = has_item && (first_row + (row - top - 1) == backend_->selected_live_log_index_);
     mvhline(row, left, ' ', width);
     if (selected) {
-      mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row, left, width, kColorSelection);
     }
     if (!has_item) {
       continue;
@@ -777,8 +778,8 @@ void LogViewerScreen::draw_live_source_pane(int top, int left, int bottom, int r
       attroff(COLOR_PAIR(color));
     }
     if (selected && color != 0) {
-      mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
-      mvchgat(row, left, static_cast<int>(rendered.size()), A_NORMAL, color, nullptr);
+      apply_role_chgat(row, left, width, kColorSelection);
+      apply_role_chgat(row, left, static_cast<int>(rendered.size()), color);
     }
   }
 }
@@ -817,7 +818,7 @@ void LogViewerScreen::draw_detail_popup(int rows, int columns) const {
 
   for (int row = top; row <= bottom; ++row) {
     mvhline(row, left, ' ', popup_width);
-    mvchgat(row, left, popup_width, A_NORMAL, kColorPopup, nullptr);
+    apply_role_chgat(row, left, popup_width, kColorPopup);
   }
   draw_box(top, left, bottom, right, kColorFrame);
 

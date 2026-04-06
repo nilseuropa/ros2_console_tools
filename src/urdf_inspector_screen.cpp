@@ -42,6 +42,7 @@ using tui::draw_help_bar_region;
 using tui::draw_search_box;
 using tui::draw_status_bar;
 using tui::draw_text_vline;
+using tui::apply_role_chgat;
 using tui::find_best_match;
 using tui::handle_search_input;
 using tui::is_alt_binding;
@@ -471,7 +472,7 @@ void UrdfInspectorScreen::draw_tree_pane(int top, int left, int bottom, int righ
     const bool selected = has_item && (first_row + (row_y - top - 1) == backend_->selected_index_);
     mvhline(row_y, left, ' ', width);
     if (selected) {
-      mvchgat(row_y, left, width, A_NORMAL, kColorSelection, nullptr);
+      apply_role_chgat(row_y, left, width, kColorSelection);
     }
     if (!has_item) {
       continue;
@@ -489,8 +490,8 @@ void UrdfInspectorScreen::draw_tree_pane(int top, int left, int bottom, int righ
       attroff(COLOR_PAIR(color));
     }
     if (selected) {
-      mvchgat(row_y, left, width, A_NORMAL, kColorSelection, nullptr);
-      mvchgat(row_y, left, std::min(width, static_cast<int>(text.size())), A_NORMAL, color, nullptr);
+      apply_role_chgat(row_y, left, width, kColorSelection);
+      apply_role_chgat(row_y, left, std::min(width, static_cast<int>(text.size())), color);
     }
   }
 }
