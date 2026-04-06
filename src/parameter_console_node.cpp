@@ -104,6 +104,8 @@ int visible_width(const std::string & line) {
 using tui::Session;
 using tui::draw_box;
 using tui::draw_box_char;
+using tui::draw_help_bar;
+using tui::draw_status_bar;
 using tui::draw_text_hline;
 using tui::draw_text_vline;
 
@@ -1362,10 +1364,7 @@ private:
   }
 
   void draw_status_line(int row, int columns) const {
-    attron(COLOR_PAIR(kColorStatus) | A_BOLD);
-    mvhline(row, 0, ' ', columns);
-    mvaddnstr(row, 1, truncate_line(status_message_, columns - 2).c_str(), columns - 2);
-    attroff(COLOR_PAIR(kColorStatus) | A_BOLD);
+    draw_status_bar(row, columns, truncate_line(status_message_, columns - 2));
   }
 
   void draw_help_line(int row, int columns) const {
@@ -1377,10 +1376,7 @@ private:
     } else {
       help = "Enter Edit  F3 Refresh Param  F4 Refresh All  Esc Nodes  F10 Exit";
     }
-    attron(COLOR_PAIR(kColorHelp));
-    mvhline(row, 0, ' ', columns);
-    mvaddnstr(row, 0, truncate_line(help, columns).c_str(), columns);
-    attroff(COLOR_PAIR(kColorHelp));
+    draw_help_bar(row, columns, truncate_line(help, columns));
   }
 
   void set_status(const std::string & message) {

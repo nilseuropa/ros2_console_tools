@@ -102,4 +102,20 @@ void draw_box(int top, int left, int bottom, int right, int color_pair) {
   attroff(COLOR_PAIR(color_pair));
 }
 
+void draw_bar(int row, int columns, const std::string & text, int color_pair, int left_padding) {
+  attron(COLOR_PAIR(color_pair));
+  mvhline(row, 0, ' ', columns);
+  const int content_width = std::max(0, columns - left_padding);
+  mvaddnstr(row, left_padding, truncate_text(text, content_width).c_str(), content_width);
+  attroff(COLOR_PAIR(color_pair));
+}
+
+void draw_status_bar(int row, int columns, const std::string & text) {
+  draw_bar(row, columns, text, kColorStatus, 1);
+}
+
+void draw_help_bar(int row, int columns, const std::string & text) {
+  draw_bar(row, columns, text, kColorHelp, 0);
+}
+
 }  // namespace ros2_console_tools::tui

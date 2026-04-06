@@ -55,6 +55,8 @@ using tui::Session;
 using tui::truncate_text;
 using tui::draw_box;
 using tui::draw_box_char;
+using tui::draw_status_bar;
+using tui::draw_help_bar;
 using tui::draw_text_vline;
 
 std::string time_string(const builtin_interfaces::msg::Time & stamp) {
@@ -740,8 +742,6 @@ private:
   }
 
   void draw_status_line(int row, int columns) const {
-    attron(COLOR_PAIR(kColorStatus));
-    mvhline(row, 0, ' ', columns);
     std::string line = status_line_;
     if (filter_prompt_open_) {
       line = "Filter text: " + filter_buffer_;
@@ -752,19 +752,15 @@ private:
       }
       line += "  follow=" + std::string(hide_unselected_ ? "selected" : "all");
     }
-    mvprintw(row, 1, "%s", truncate_text(line, columns - 1).c_str());
-    attroff(COLOR_PAIR(kColorStatus));
+    draw_status_bar(row, columns, line);
   }
 
   void draw_help_line(int row, int columns) const {
-    attron(COLOR_PAIR(kColorHelp));
-    mvhline(row, 0, ' ', columns);
     const std::string help =
       view_mode_ == ViewMode::SourceLive
       ? "Enter Details  Esc Back  F4 Refresh  F6 Level  / Filter  F10 Exit"
       : "Tab Pane  Space Mark  Enter Live  F4 Refresh  F5 Hide Unselected  F6 Level  / Filter  F10 Exit";
-    mvprintw(row, 1, "%s", truncate_text(help, columns - 1).c_str());
-    attroff(COLOR_PAIR(kColorHelp));
+    draw_help_bar(row, columns, help);
   }
 
   void draw_detail_popup(int rows, int columns) const {

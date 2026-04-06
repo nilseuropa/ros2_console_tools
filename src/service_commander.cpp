@@ -48,10 +48,12 @@ enum class ViewMode {
 };
 
 using tui::Session;
-using tui::truncate_text;
 using tui::draw_box;
 using tui::draw_box_char;
+using tui::draw_help_bar;
+using tui::draw_status_bar;
 using tui::draw_text_vline;
+using tui::truncate_text;
 
 template<typename T>
 std::string scalar_to_string(const T & value) {
@@ -628,27 +630,21 @@ private:
   }
 
   void draw_status_line(int row, int columns) const {
-    attron(COLOR_PAIR(kColorStatus));
-    mvhline(row, 0, ' ', columns);
     std::string line = status_line_;
     if (view_mode_ == ViewMode::ServiceDetail && !selected_service_.name.empty()) {
       line = truncate_text(
         selected_service_.name + " [" + selected_service_.type + "]  " + status_line_,
-        columns - 1);
+        columns - 2);
     }
-    mvprintw(row, 1, "%s", line.c_str());
-    attroff(COLOR_PAIR(kColorStatus));
+    draw_status_bar(row, columns, line);
   }
 
   void draw_help_line(int row, int columns) const {
-    attron(COLOR_PAIR(kColorHelp));
-    mvhline(row, 0, ' ', columns);
     const std::string help =
       view_mode_ == ViewMode::ServiceDetail
       ? "F2 Call  F3 Reset Request  F4 Refresh  Esc Services  F10 Exit"
       : "Enter Inspect  F4 Refresh  F10 Exit";
-    mvprintw(row, 1, "%s", truncate_text(help, columns - 1).c_str());
-    attroff(COLOR_PAIR(kColorHelp));
+    draw_help_bar(row, columns, truncate_text(help, columns - 1));
   }
 
   std::vector<ServiceEntry> services_;
