@@ -45,6 +45,11 @@ enum class PaneFocus {
   Logs,
 };
 
+enum class ViewMode {
+  Split,
+  SourceLive,
+};
+
 class NcursesSession {
 public:
   NcursesSession() {
@@ -180,8 +185,16 @@ private:
     switch (key) {
       case KEY_F(10):
         return false;
+      case 27:
+        if (view_mode_ == ViewMode::SourceLive) {
+          close_live_source();
+          return true;
+        }
+        break;
       case '\t':
-        focus_ = focus_ == PaneFocus::Sources ? PaneFocus::Logs : PaneFocus::Sources;
+        if (view_mode_ == ViewMode::Split) {
+          focus_ = focus_ == PaneFocus::Sources ? PaneFocus::Logs : PaneFocus::Sources;
+        }
         return true;
       case KEY_F(4):
         refresh_sources();
@@ -204,6 +217,9 @@ private:
         break;
     }
 
+    if (view_mode_ == ViewMode::SourceLive) {
+      return handle_live_source_key(key);
+    }
     if (focus_ == PaneFocus::Sources) {
       return handle_source_key(key);
     }
@@ -285,6 +301,46 @@ private:
       case ' ':
       case KEY_IC:
         toggle_selected_source();
+        return true;
+      case '\n':
+      case KEY_ENTER:
+        open_live_source();
+        return true;
+      default:
+        return true;
+    }
+  }
+
+  bool handle_live_source_key(int key) {
+    const auto snapshot = live_source_logs_snapshot();
+    clamp_live_log_selection(snapshot);
+
+    switch (key) {
+      case KEY_UP:
+      case 'k':
+        if (selected_live_log_index_ > 0) {
+          --selected_live_log_index_;
+        }
+        return true;
+      case KEY_DOWN:
+      case 'j':
+        if (selected_live_log_index_ + 1 < static_cast<int>(snapshot.size())) {
+          ++selected_live_log_index_;
+        }
+        return true;
+      case KEY_PPAGE:
+        selected_live_log_index_ = std::max(0, selected_live_log_index_ - page_step());
+        return true;
+      case KEY_NPAGE:
+        if (!snapshot.empty()) {
+          selected_live_log_index_ = std::min(
+            static_cast<int>(snapshot.size()) - 1,
+            selected_live_log_index_ + page_step());
+        }
+        return true;
+      case '\n':
+      case KEY_ENTER:
+        open_live_detail_popup(snapshot);
         return true;
       default:
         return true;
@@ -431,6 +487,33 @@ private:
     return snapshot;
   }
 
+  std::vector<LogEntry> live_source_logs_snapshot() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<LogEntry> snapshot;
+    snapshot.reserve(logs_.size());
+
+    for (const auto & log : logs_) {
+      if (log.source != live_source_name_) {
+        continue;
+      }
+      if (log.level < minimum_level_) {
+        continue;
+      }
+      if (!text_filter_.empty()) {
+        if (log.message.find(text_filter_) == std::string::npos &&
+          log.source.find(text_filter_) == std::string::npos &&
+          log.file.find(text_filter_) == std::string::npos &&
+          log.function_name.find(text_filter_) == std::string::npos)
+        {
+          continue;
+        }
+      }
+      snapshot.push_back(log);
+    }
+
+    return snapshot;
+  }
+
   void toggle_selected_source() {
     auto snapshot = source_snapshot();
     clamp_source_selection(snapshot);
@@ -460,6 +543,42 @@ private:
     detail_popup_open_ = true;
   }
 
+  void open_live_detail_popup(const std::vector<LogEntry> & snapshot) {
+    clamp_live_log_selection(snapshot);
+    if (snapshot.empty() || selected_live_log_index_ < 0 ||
+      selected_live_log_index_ >= static_cast<int>(snapshot.size()))
+    {
+      set_status("No log line selected.");
+      return;
+    }
+
+    detail_entry_ = snapshot[static_cast<std::size_t>(selected_live_log_index_)];
+    detail_popup_open_ = true;
+  }
+
+  void open_live_source() {
+    auto snapshot = source_snapshot();
+    clamp_source_selection(snapshot);
+    if (snapshot.empty() || selected_source_index_ < 0 || selected_source_index_ >= static_cast<int>(snapshot.size())) {
+      set_status("No source selected.");
+      return;
+    }
+
+    live_source_name_ = snapshot[static_cast<std::size_t>(selected_source_index_)].name;
+    view_mode_ = ViewMode::SourceLive;
+    live_log_scroll_ = 0;
+    selected_live_log_index_ = 0;
+    set_status("Live view: " + live_source_name_ + ".");
+  }
+
+  void close_live_source() {
+    view_mode_ = ViewMode::Split;
+    live_source_name_.clear();
+    live_log_scroll_ = 0;
+    selected_live_log_index_ = 0;
+    set_status("Returned to split view.");
+  }
+
   void draw() {
     erase();
 
@@ -472,14 +591,17 @@ private:
 
     draw_box(0, 0, content_bottom, columns - 1);
     mvprintw(0, 1, "Log Viewer ");
-
-    const int left_width = std::max(24, (columns - 2) / 4);
-    const int separator_x = 1 + left_width;
-    draw_sources_pane(1, 1, content_bottom - 1, separator_x - 1);
-    attron(COLOR_PAIR(kColorFrame));
-    mvvline(1, separator_x, ACS_VLINE, content_bottom - 1);
-    attroff(COLOR_PAIR(kColorFrame));
-    draw_logs_pane(1, separator_x + 1, content_bottom - 1, columns - 2);
+    if (view_mode_ == ViewMode::Split) {
+      const int left_width = std::max(24, (columns - 2) / 4);
+      const int separator_x = 1 + left_width;
+      draw_sources_pane(1, 1, content_bottom - 1, separator_x - 1);
+      attron(COLOR_PAIR(kColorFrame));
+      mvvline(1, separator_x, ACS_VLINE, content_bottom - 1);
+      attroff(COLOR_PAIR(kColorFrame));
+      draw_logs_pane(1, separator_x + 1, content_bottom - 1, columns - 2);
+    } else {
+      draw_live_source_pane(1, 1, content_bottom - 1, columns - 2);
+    }
     draw_status_line(status_row, columns);
     draw_help_line(help_row, columns);
     if (detail_popup_open_) {
@@ -621,6 +743,55 @@ private:
     }
   }
 
+  void draw_live_source_pane(int top, int left, int bottom, int right) {
+    const auto snapshot = live_source_logs_snapshot();
+    clamp_live_log_selection(snapshot);
+
+    const int width = right - left + 1;
+    const int visible_rows = std::max(1, bottom - top + 1);
+    if (selected_live_log_index_ < live_log_scroll_) {
+      live_log_scroll_ = selected_live_log_index_;
+    }
+    if (selected_live_log_index_ >= live_log_scroll_ + visible_rows - 1) {
+      live_log_scroll_ = std::max(0, selected_live_log_index_ - visible_rows + 2);
+    }
+
+    attron(COLOR_PAIR(kColorHeader));
+    mvprintw(top, left, "%-*s", width, truncate_text("Live: " + live_source_name_, width).c_str());
+    attroff(COLOR_PAIR(kColorHeader));
+
+    const int first_row = live_log_scroll_;
+    const int last_row = std::min(static_cast<int>(snapshot.size()), first_row + visible_rows - 1);
+    for (int row = top + 1; row <= bottom; ++row) {
+      const bool has_item = first_row + (row - top - 1) < last_row;
+      const bool selected = has_item && (first_row + (row - top - 1) == selected_live_log_index_);
+      mvhline(row, left, ' ', width);
+      if (selected) {
+        mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+      }
+      if (!has_item) {
+        continue;
+      }
+
+      const auto & entry = snapshot[static_cast<std::size_t>(first_row + (row - top - 1))];
+      const int color = level_color(entry.level, selected);
+      const std::string line =
+        time_string(entry.stamp) + " " + level_string(entry.level) + " " + entry.message;
+      const std::string rendered = truncate_text(line, width);
+      if (color != 0) {
+        attron(COLOR_PAIR(color));
+      }
+      mvprintw(row, left, "%-*s", width, rendered.c_str());
+      if (color != 0) {
+        attroff(COLOR_PAIR(color));
+      }
+      if (selected && color != 0) {
+        mvchgat(row, left, width, A_NORMAL, kColorSelection, nullptr);
+        mvchgat(row, left, static_cast<int>(rendered.size()), A_NORMAL, color, nullptr);
+      }
+    }
+  }
+
   void draw_status_line(int row, int columns) const {
     attron(COLOR_PAIR(kColorStatus));
     mvhline(row, 0, ' ', columns);
@@ -642,7 +813,9 @@ private:
     attron(COLOR_PAIR(kColorHelp));
     mvhline(row, 0, ' ', columns);
     const std::string help =
-      "Tab Pane  Space Mark  Enter Details  F4 Refresh  F5 Hide Unselected  F6 Level  / Filter  F10 Exit";
+      view_mode_ == ViewMode::SourceLive
+      ? "Enter Details  Esc Back  F4 Refresh  F6 Level  / Filter  F10 Exit"
+      : "Tab Pane  Space Mark  Enter Live  F4 Refresh  F5 Hide Unselected  F6 Level  / Filter  F10 Exit";
     mvprintw(row, 1, "%s", truncate_text(help, columns - 1).c_str());
     attroff(COLOR_PAIR(kColorHelp));
   }
@@ -693,6 +866,16 @@ private:
     selected_log_index_ = std::clamp(selected_log_index_, 0, static_cast<int>(snapshot.size()) - 1);
   }
 
+  void clamp_live_log_selection(const std::vector<LogEntry> & snapshot) {
+    if (snapshot.empty()) {
+      selected_live_log_index_ = 0;
+      live_log_scroll_ = 0;
+      return;
+    }
+    selected_live_log_index_ = std::clamp(
+      selected_live_log_index_, 0, static_cast<int>(snapshot.size()) - 1);
+  }
+
   void set_status(const std::string & text) {
     std::lock_guard<std::mutex> lock(mutex_);
     set_status_locked(text);
@@ -706,14 +889,18 @@ private:
   rclcpp::Subscription<LogMessage>::SharedPtr log_subscription_;
   std::deque<LogEntry> logs_;
   std::map<std::string, bool> sources_;
+  ViewMode view_mode_{ViewMode::Split};
   PaneFocus focus_{PaneFocus::Logs};
   int selected_source_index_{0};
   int selected_log_index_{0};
+  int selected_live_log_index_{0};
   int source_scroll_{0};
   int log_scroll_{0};
+  int live_log_scroll_{0};
   bool hide_unselected_{false};
   uint8_t minimum_level_{LogMessage::DEBUG};
   std::string text_filter_;
+  std::string live_source_name_;
   bool filter_prompt_open_{false};
   std::string filter_buffer_;
   bool detail_popup_open_{false};
