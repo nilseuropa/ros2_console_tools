@@ -101,6 +101,8 @@ private:
   bool launch_selected_node_parameters();
   bool launch_selected_detail_action();
   const DetailLine * selected_detail_line() const;
+  std::vector<std::string> detail_targets_for_section(
+    const std::string & section_key, NodeDetailAction action) const;
   void draw();
   void draw_node_list(int top, int left, int bottom, int right);
   void draw_detail_pane(int top, int left, int bottom, int right);

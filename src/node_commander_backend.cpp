@@ -125,7 +125,9 @@ std::vector<DetailLine> NodeCommanderBackend::selected_node_details() const {
     const std::vector<GraphEndpoint> & entries)
     {
       NodeDetailAction header_action = NodeDetailAction::None;
-      if (section_key == "services") {
+      if (section_key == "publishers" || section_key == "subscribers") {
+        header_action = NodeDetailAction::OpenTopicMonitor;
+      } else if (section_key == "services") {
         header_action = NodeDetailAction::OpenServiceCommander;
       }
       lines.push_back({title, true, 0, header_action, details.node_name, section_key});

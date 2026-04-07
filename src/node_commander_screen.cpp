@@ -4,6 +4,7 @@
 
 #include "ros2_console_tools/action_commander.hpp"
 #include "ros2_console_tools/log_viewer.hpp"
+#include "ros2_console_tools/topic_monitor.hpp"
 #include "ros2_console_tools/tf_monitor.hpp"
 #include "ros2_console_tools/urdf_inspector.hpp"
 
@@ -22,7 +23,6 @@
 namespace ros2_console_tools {
 
 int run_parameter_commander_tool(const std::string & target_node, bool embedded_mode);
-int run_topic_monitor_tool(const std::string & initial_topic, bool embedded_mode);
 
 namespace {
 
@@ -619,7 +619,29 @@ bool NodeCommanderScreen::launch_selected_detail_action() {
       (void)run_parameter_commander_tool(line->target, true);
       break;
     case NodeDetailAction::OpenTopicMonitor:
-      (void)run_topic_monitor_tool(line->target, true);
+      if (line->is_header) {
+        const auto topic_targets = detail_targets_for_section(line->section_key, NodeDetailAction::OpenTopicMonitor);
+        if (topic_targets.empty()) {
+          resume_parent_screen();
+          std::lock_guard<std::mutex> lock(backend_->mutex_);
+          backend_->status_line_ = "No topics available in " + line->text + ".";
+          return true;
+        }
+
+        TopicMonitorLaunchOptions options;
+        options.allowed_topics = topic_targets;
+        options.embedded_mode = true;
+        options.monitor_allowed_topics_on_start = true;
+        (void)run_topic_monitor_tool(options);
+      } else {
+        TopicMonitorLaunchOptions options;
+        options.initial_topic = line->target;
+        options.allowed_topics.push_back(line->target);
+        options.embedded_mode = true;
+        options.open_initial_topic_detail = true;
+        options.exit_on_detail_escape = true;
+        (void)run_topic_monitor_tool(options);
+      }
       break;
     case NodeDetailAction::OpenServiceCommander:
       service_launch_ok = run_service_commander_subprocess(
@@ -650,6 +672,19 @@ const DetailLine * NodeCommanderScreen::selected_detail_line() const {
     return nullptr;
   }
   return &detail_lines_cache_[static_cast<std::size_t>(detail_selected_index_)];
+}
+
+std::vector<std::string> NodeCommanderScreen::detail_targets_for_section(
+  const std::string & section_key, NodeDetailAction action) const
+{
+  std::vector<std::string> targets;
+  for (const auto & line : raw_detail_lines_cache_) {
+    if (line.is_header || line.section_key != section_key || line.action != action || line.target.empty()) {
+      continue;
+    }
+    targets.push_back(line.target);
+  }
+  return targets;
 }
 
 void NodeCommanderScreen::draw() {

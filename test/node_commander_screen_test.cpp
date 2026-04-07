@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <geometry_msgs/msg/twist.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <memory>
@@ -32,6 +34,11 @@ protected:
 TEST_F(NodeCommanderScreenTest, HeaderActionsExposeNodeScopedToolsAndCollapseHidesChildren) {
   auto target_node = std::make_shared<rclcpp::Node>("node_commander_test_target");
   target_node->declare_parameter("example_parameter", 7);
+  auto publisher = target_node->create_publisher<geometry_msgs::msg::Twist>("/node_commander_test/out", 10);
+  auto subscriber = target_node->create_subscription<geometry_msgs::msg::Twist>(
+    "/node_commander_test/in", 10, [](geometry_msgs::msg::Twist::ConstSharedPtr) {});
+  (void)publisher;
+  (void)subscriber;
 
   auto backend = std::make_shared<NodeCommanderBackend>();
   NodeCommanderScreen screen(backend);
@@ -85,6 +92,30 @@ TEST_F(NodeCommanderScreenTest, HeaderActionsExposeNodeScopedToolsAndCollapseHid
     });
   EXPECT_NE(parameter_header, lines.end());
 
+  const auto publishers_header = std::find_if(
+    lines.begin(),
+    lines.end(),
+    [](const DetailLine & line) {
+      return line.is_header &&
+        line.text == "Publishers" &&
+        line.action == NodeDetailAction::OpenTopicMonitor &&
+        line.target == "/node_commander_test_target" &&
+        line.section_key == "publishers";
+    });
+  EXPECT_NE(publishers_header, lines.end());
+
+  const auto subscribers_header = std::find_if(
+    lines.begin(),
+    lines.end(),
+    [](const DetailLine & line) {
+      return line.is_header &&
+        line.text == "Subscribers" &&
+        line.action == NodeDetailAction::OpenTopicMonitor &&
+        line.target == "/node_commander_test_target" &&
+        line.section_key == "subscribers";
+    });
+  EXPECT_NE(subscribers_header, lines.end());
+
   const auto services_header = std::find_if(
     lines.begin(),
     lines.end(),
@@ -107,7 +138,40 @@ TEST_F(NodeCommanderScreenTest, HeaderActionsExposeNodeScopedToolsAndCollapseHid
     });
   EXPECT_NE(service_entry, lines.end());
 
+  const auto publisher_entry = std::find_if(
+    lines.begin(),
+    lines.end(),
+    [](const DetailLine & line) {
+      return !line.is_header &&
+        line.section_key == "publishers" &&
+        line.action == NodeDetailAction::OpenTopicMonitor &&
+        line.target == "/node_commander_test/out";
+    });
+  EXPECT_NE(publisher_entry, lines.end());
+
+  const auto subscriber_entry = std::find_if(
+    lines.begin(),
+    lines.end(),
+    [](const DetailLine & line) {
+      return !line.is_header &&
+        line.section_key == "subscribers" &&
+        line.action == NodeDetailAction::OpenTopicMonitor &&
+        line.target == "/node_commander_test/in";
+    });
+  EXPECT_NE(subscriber_entry, lines.end());
+
   screen.refresh_detail_lines_cache();
+  const auto publisher_targets =
+    screen.detail_targets_for_section("publishers", NodeDetailAction::OpenTopicMonitor);
+  const auto subscriber_targets =
+    screen.detail_targets_for_section("subscribers", NodeDetailAction::OpenTopicMonitor);
+  EXPECT_NE(
+    std::find(publisher_targets.begin(), publisher_targets.end(), "/node_commander_test/out"),
+    publisher_targets.end());
+  EXPECT_NE(
+    std::find(subscriber_targets.begin(), subscriber_targets.end(), "/node_commander_test/in"),
+    subscriber_targets.end());
+
   const bool service_child_visible_before = std::any_of(
     screen.detail_lines_cache_.begin(),
     screen.detail_lines_cache_.end(),

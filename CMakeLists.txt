@@ -291,6 +291,7 @@ if(BUILD_TESTING)
   if(TARGET node_commander_screen_test)
     ament_target_dependencies(node_commander_screen_test
       ament_index_cpp
+      geometry_msgs
       rclcpp
     )
     target_include_directories(node_commander_screen_test PRIVATE ${CURSES_INCLUDE_DIR} include)
@@ -305,6 +306,7 @@ if(BUILD_TESTING)
   if(TARGET topic_monitor_backend_test)
     ament_target_dependencies(topic_monitor_backend_test
       ament_index_cpp
+      geometry_msgs
       rclcpp
       rosidl_typesupport_introspection_cpp
     )
