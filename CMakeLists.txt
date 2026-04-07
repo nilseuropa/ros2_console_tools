@@ -134,9 +134,6 @@ target_include_directories(node_commander_lib PUBLIC ${CURSES_INCLUDE_DIR} inclu
 target_link_libraries(
   node_commander_lib
   ${NCURSESW_LIBRARY}
-  parameter_commander_lib
-  topic_monitor_lib
-  log_viewer_lib
 )
 
 add_executable(node_commander src/node_commander.cpp)
@@ -175,9 +172,6 @@ target_link_libraries(service_commander service_commander_lib)
 install(TARGETS service_commander_lib service_commander
   DESTINATION lib/${PROJECT_NAME}
 )
-
-target_link_libraries(node_commander_lib service_commander_lib)
-target_link_libraries(node_commander_lib action_commander_lib)
 
 add_library(action_commander_lib
   src/action_commander_backend.cpp
@@ -229,8 +223,6 @@ install(TARGETS tf_monitor_lib tf_monitor
   DESTINATION lib/${PROJECT_NAME}
 )
 
-target_link_libraries(node_commander_lib tf_monitor_lib)
-
 add_library(urdf_inspector_lib
   src/urdf_inspector_backend.cpp
   src/urdf_inspector_screen.cpp
@@ -256,7 +248,16 @@ install(TARGETS urdf_inspector_lib urdf_inspector
   DESTINATION lib/${PROJECT_NAME}
 )
 
-target_link_libraries(node_commander_lib urdf_inspector_lib)
+target_link_libraries(
+  node_commander_lib
+  parameter_commander_lib
+  topic_monitor_lib
+  log_viewer_lib
+  service_commander_lib
+  action_commander_lib
+  tf_monitor_lib
+  urdf_inspector_lib
+)
 
 install(DIRECTORY include/
   DESTINATION include
