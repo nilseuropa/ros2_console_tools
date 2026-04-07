@@ -251,7 +251,7 @@ void TfMonitorScreen::draw_tree_pane(int top, int left, int bottom, int right) {
       std::string(marked ? "* " : "  ") +
       std::string(static_cast<std::size_t>(entry.depth * 2), ' ') +
       entry.child_frame;
-    const int text_color = entry.stale ? kColorStale : (entry.is_static ? 0 : kColorDynamic);
+    const int text_color = entry.is_root ? 0 : (entry.stale ? kColorStale : (entry.is_static ? 0 : kColorDynamic));
 
     if (text_color != 0 && !selected) {
       attron(COLOR_PAIR(text_color));
@@ -276,7 +276,9 @@ void TfMonitorScreen::draw_status_line(int row, int columns) const {
     backend_->selected_index_ < static_cast<int>(backend_->rows_.size()))
   {
     const auto & selected = backend_->rows_[static_cast<std::size_t>(backend_->selected_index_)];
-    line = selected.parent_frame + " -> " + selected.child_frame + "  " + backend_->status_line_;
+    line = selected.is_root
+      ? (selected.child_frame + "  root frame  " + backend_->status_line_)
+      : (selected.parent_frame + " -> " + selected.child_frame + "  " + backend_->status_line_);
   }
   if (!backend_->selected_frames_.empty()) {
     line += "  selected=" + std::to_string(backend_->selected_frames_.size());

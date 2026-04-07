@@ -132,6 +132,16 @@ void TfMonitorBackend::refresh_rows() {
   frame_poses_.clear();
   const auto now = TfClock::now();
   std::set<std::string> visited;
+  const auto append_root_row = [this](const std::string & root_frame) {
+      rows_.push_back(TfRow{
+        "",
+        root_frame,
+        false,
+        true,
+        0,
+        "root",
+        false});
+    };
 
   std::function<void(const std::string &, int, const std::string &, const Pose &)> append_children =
     [&](const std::string & parent, int depth, const std::string & root_frame, const Pose & parent_pose) {
@@ -155,6 +165,7 @@ void TfMonitorBackend::refresh_rows() {
           link_it->second.parent_frame,
           link_it->second.child_frame,
           link_it->second.is_static,
+          false,
           depth,
           format_freshness(link_it->second, now, stale),
           stale});
@@ -164,23 +175,30 @@ void TfMonitorBackend::refresh_rows() {
 
   for (const auto & root : roots) {
     frame_poses_[root] = FramePose{root, Pose{}};
-    append_children(root, 0, root, Pose{});
+    visited.insert(root);
+    append_root_row(root);
+    append_children(root, 1, root, Pose{});
   }
   for (const auto & [child, link] : links_by_child_) {
     if (visited.find(child) != visited.end()) {
       continue;
     }
+    visited.insert(link.parent_frame);
     bool stale = false;
     frame_poses_[link.parent_frame] = FramePose{link.parent_frame, Pose{}};
+    append_root_row(link.parent_frame);
     const Pose child_pose = pose_from_msg(link.transform);
     frame_poses_[child] = FramePose{link.parent_frame, child_pose};
     rows_.push_back(TfRow{
       link.parent_frame,
       link.child_frame,
       link.is_static,
-      0,
+      false,
+      1,
       format_freshness(link, now, stale),
       stale});
+    visited.insert(child);
+    append_children(child, 2, link.parent_frame, child_pose);
   }
 
   selected_frames_.erase(
@@ -191,8 +209,8 @@ void TfMonitorBackend::refresh_rows() {
 
   clamp_selection();
   status_line_ =
-    "Loaded " + std::to_string(rows_.size()) + " TF links from "
-    + std::to_string(links_by_child_.size()) + " child frames.";
+    "Loaded " + std::to_string(links_by_child_.size()) + " TF links across "
+    + std::to_string(all_frames.size()) + " frames.";
 }
 
 void TfMonitorBackend::clamp_selection() {

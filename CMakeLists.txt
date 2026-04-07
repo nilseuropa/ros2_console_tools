@@ -315,6 +315,21 @@ if(BUILD_TESTING)
       topic_monitor_lib
     )
   endif()
+
+  ament_add_gtest(tf_monitor_backend_test
+    test/tf_monitor_backend_test.cpp
+  )
+  if(TARGET tf_monitor_backend_test)
+    ament_target_dependencies(tf_monitor_backend_test
+      geometry_msgs
+      rclcpp
+      tf2_msgs
+    )
+    target_include_directories(tf_monitor_backend_test PRIVATE ${CURSES_INCLUDE_DIR} include)
+    target_link_libraries(tf_monitor_backend_test
+      tf_monitor_lib
+    )
+  endif()
 endif()
 
 ament_package()

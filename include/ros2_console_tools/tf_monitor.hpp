@@ -60,6 +60,7 @@ struct TfRow {
   std::string parent_frame;
   std::string child_frame;
   bool is_static{false};
+  bool is_root{false};
   int depth{0};
   std::string freshness;
   bool stale{false};
