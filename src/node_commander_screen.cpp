@@ -3,6 +3,7 @@
 #include <ament_index_cpp/get_package_prefix.hpp>
 
 #include "ros2_console_tools/action_commander.hpp"
+#include "ros2_console_tools/diagnostics_viewer.hpp"
 #include "ros2_console_tools/log_viewer.hpp"
 #include "ros2_console_tools/topic_monitor.hpp"
 #include "ros2_console_tools/tf_monitor.hpp"
@@ -210,6 +211,8 @@ bool NodeCommanderScreen::handle_key(int key) {
       return launch_tf_monitor();
     case KEY_F(8):
       return launch_urdf_inspector();
+    case KEY_F(9):
+      return launch_diagnostics_viewer();
     case '\t':
       focus_pane_ = focus_pane_ == NodeCommanderFocusPane::NodeList
         ? NodeCommanderFocusPane::DetailPane
@@ -578,6 +581,18 @@ bool NodeCommanderScreen::launch_urdf_inspector() {
   return true;
 }
 
+bool NodeCommanderScreen::launch_diagnostics_viewer() {
+  def_prog_mode();
+  endwin();
+  (void)run_diagnostics_viewer_tool(true);
+  resume_parent_screen();
+  {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Returned from diagnostics_viewer.";
+  }
+  return true;
+}
+
 bool NodeCommanderScreen::launch_selected_node_parameters() {
   std::string selected_node;
   {
@@ -727,7 +742,7 @@ void NodeCommanderScreen::draw() {
   draw_search_box(layout.pane_rows, columns, search_state_);
   if (help_popup_open_) {
     const int popup_width = std::min(columns - 8, 76);
-    const int popup_height = 17;
+    const int popup_height = 18;
     const int popup_left = std::max(2, (columns - popup_width) / 2);
     const int popup_top = std::max(1, (rows - popup_height) / 2);
     const int popup_right = popup_left + popup_width - 1;
@@ -768,8 +783,9 @@ void NodeCommanderScreen::draw() {
     draw_help_item(popup_top + 11, "F6", "action_commander");
     draw_help_item(popup_top + 12, "F7", "tf_monitor");
     draw_help_item(popup_top + 13, "F8", "urdf_inspector");
-    draw_help_item(popup_top + 14, "Alt+T", "toggle terminal");
-    draw_help_item(popup_top + 15, "Esc/F1", "close help");
+    draw_help_item(popup_top + 14, "F9", "diagnostics_viewer");
+    draw_help_item(popup_top + 15, "Alt+T", "toggle terminal");
+    draw_help_item(popup_top + 16, "Esc/F1", "close help");
   }
   if (terminal_pane_.visible()) {
     terminal_pane_.draw(layout.terminal_top, 0, rows - 1, columns - 1);
@@ -891,7 +907,7 @@ void NodeCommanderScreen::draw_help_line(int row, int columns) const {
     row,
     columns,
     tui::with_terminal_help(
-      "F1 Help  F2 Logs  F3 Topics  F4 Node Params  F5 Node Services  F6 Actions  F7 Transforms  F8 URDF  Alt+S Search  F10 Exit",
+      "F1 Help  F2 Logs  F3 Topics  F4 Node Params  F5 Node Services  F6 Actions  F7 Transforms  F8 URDF  F9 Diagnostics  F10 Exit  Alt+S Search",
       terminal_pane_.visible()));
 }
 

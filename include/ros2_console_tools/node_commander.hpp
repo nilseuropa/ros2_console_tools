@@ -98,6 +98,7 @@ private:
   bool launch_topic_monitor();
   bool launch_tf_monitor();
   bool launch_urdf_inspector();
+  bool launch_diagnostics_viewer();
   bool launch_selected_node_parameters();
   bool launch_selected_detail_action();
   const DetailLine * selected_detail_line() const;

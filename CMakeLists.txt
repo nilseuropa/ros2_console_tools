@@ -16,6 +16,7 @@ find_package(ament_index_cpp REQUIRED)
 set(CURSES_NEED_WIDE TRUE)
 find_package(Curses REQUIRED)
 find_library(NCURSESW_LIBRARY NAMES ncursesw)
+find_package(diagnostic_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -118,6 +119,38 @@ target_include_directories(log_viewer PRIVATE ${CURSES_INCLUDE_DIR} include)
 target_link_libraries(log_viewer log_viewer_lib)
 
 install(TARGETS log_viewer_lib log_viewer
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_library(diagnostics_viewer_lib
+  src/diagnostics_viewer_backend.cpp
+  src/diagnostics_viewer_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(diagnostics_viewer_lib
+  ament_index_cpp
+  diagnostic_msgs
+  rclcpp
+)
+target_include_directories(diagnostics_viewer_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(diagnostics_viewer_lib ${NCURSESW_LIBRARY})
+
+add_executable(diagnostics_viewer src/diagnostics_viewer.cpp)
+ament_target_dependencies(diagnostics_viewer
+  diagnostic_msgs
+  rclcpp
+)
+target_include_directories(diagnostics_viewer PRIVATE ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(diagnostics_viewer diagnostics_viewer_lib)
+
+## Manual diagnostics publisher kept on disk for ad hoc local testing, but disabled by default.
+# add_executable(diagnostics_mock_node test/diagnostics_mock_node.cpp)
+# ament_target_dependencies(diagnostics_mock_node
+#   diagnostic_msgs
+#   rclcpp
+# )
+
+install(TARGETS diagnostics_viewer_lib diagnostics_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -253,6 +286,7 @@ target_link_libraries(
   parameter_commander_lib
   topic_monitor_lib
   log_viewer_lib
+  diagnostics_viewer_lib
   service_commander_lib
   action_commander_lib
   tf_monitor_lib
