@@ -143,13 +143,14 @@ ament_target_dependencies(diagnostics_viewer
 target_include_directories(diagnostics_viewer PRIVATE ${CURSES_INCLUDE_DIR} include)
 target_link_libraries(diagnostics_viewer diagnostics_viewer_lib)
 
-add_executable(diagnostics_mock_node test/diagnostics_mock_node.cpp)
-ament_target_dependencies(diagnostics_mock_node
-  diagnostic_msgs
-  rclcpp
-)
+## Manual diagnostics publisher kept on disk for ad hoc local testing, but disabled by default.
+# add_executable(diagnostics_mock_node test/diagnostics_mock_node.cpp)
+# ament_target_dependencies(diagnostics_mock_node
+#   diagnostic_msgs
+#   rclcpp
+# )
 
-install(TARGETS diagnostics_viewer_lib diagnostics_viewer diagnostics_mock_node
+install(TARGETS diagnostics_viewer_lib diagnostics_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 

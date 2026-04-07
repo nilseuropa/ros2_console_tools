@@ -25,6 +25,7 @@ Highlights:
 - node list on the left
 - detail pane with publishers, subscribers, and services
 - parameter service availability indicator
+- embedded tool launchers, including `F9` for `diagnostics_viewer`
 - shared incremental `Alt+S` search
 
 Main files:
@@ -197,6 +198,35 @@ Main files:
 - [src/log_viewer_backend.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/log_viewer_backend.cpp)
 - [src/log_viewer_screen.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/log_viewer_screen.cpp)
 - [src/log_viewer.cpp](/home/nils/dev_ws/src/ros2_console_tools/src/log_viewer.cpp)
+
+### diagnostics_viewer
+
+Binary:
+
+```bash
+ros2 run ros2_console_tools diagnostics_viewer
+```
+
+Purpose:
+
+- monitor `/diagnostics` and `/diagnostics_agg`
+- inspect current diagnostic status levels and messages
+- inspect detailed key/value pairs for a selected status
+
+Highlights:
+
+- status list on the left
+- detail pane for the selected diagnostic entry
+- severity filtering
+- shared incremental `Alt+S` search
+- embeddable in `node_commander` on `F9`
+
+Main files:
+
+- [include/ros2_console_tools/diagnostics_viewer.hpp](/home/nils/ros2_extras/src/ros2_console_tools/include/ros2_console_tools/diagnostics_viewer.hpp)
+- [src/diagnostics_viewer_backend.cpp](/home/nils/ros2_extras/src/ros2_console_tools/src/diagnostics_viewer_backend.cpp)
+- [src/diagnostics_viewer_screen.cpp](/home/nils/ros2_extras/src/ros2_console_tools/src/diagnostics_viewer_screen.cpp)
+- [src/diagnostics_viewer.cpp](/home/nils/ros2_extras/src/ros2_console_tools/src/diagnostics_viewer.cpp)
 
 ### tf_monitor
 
