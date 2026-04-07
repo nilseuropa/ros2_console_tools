@@ -266,4 +266,55 @@ install(FILES config/tui_theme.yaml
   DESTINATION share/${PROJECT_NAME}/config
 )
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(service_commander_backend_test
+    test/service_commander_backend_test.cpp
+  )
+  if(TARGET service_commander_backend_test)
+    ament_target_dependencies(service_commander_backend_test
+      ament_index_cpp
+      rclcpp
+      rosidl_typesupport_introspection_cpp
+    )
+    target_include_directories(service_commander_backend_test PRIVATE ${CURSES_INCLUDE_DIR} include)
+    target_link_libraries(service_commander_backend_test
+      node_commander_lib
+      service_commander_lib
+    )
+  endif()
+
+  ament_add_gtest(node_commander_screen_test
+    test/node_commander_screen_test.cpp
+  )
+  if(TARGET node_commander_screen_test)
+    ament_target_dependencies(node_commander_screen_test
+      ament_index_cpp
+      geometry_msgs
+      rclcpp
+    )
+    target_include_directories(node_commander_screen_test PRIVATE ${CURSES_INCLUDE_DIR} include)
+    target_link_libraries(node_commander_screen_test
+      node_commander_lib
+    )
+  endif()
+
+  ament_add_gtest(topic_monitor_backend_test
+    test/topic_monitor_backend_test.cpp
+  )
+  if(TARGET topic_monitor_backend_test)
+    ament_target_dependencies(topic_monitor_backend_test
+      ament_index_cpp
+      geometry_msgs
+      rclcpp
+      rosidl_typesupport_introspection_cpp
+    )
+    target_include_directories(topic_monitor_backend_test PRIVATE ${CURSES_INCLUDE_DIR} include)
+    target_link_libraries(topic_monitor_backend_test
+      topic_monitor_lib
+    )
+  endif()
+endif()
+
 ament_package()

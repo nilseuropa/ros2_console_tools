@@ -11,8 +11,12 @@
 
 namespace ros2_console_tools {
 
-int run_service_commander_tool(const std::string & initial_service, bool embedded_mode) {
-  auto backend = std::make_shared<ServiceCommanderBackend>(initial_service);
+int run_service_commander_tool(
+  const std::string & initial_node,
+  const std::string & initial_service,
+  bool embedded_mode)
+{
+  auto backend = std::make_shared<ServiceCommanderBackend>(initial_node, initial_service);
   ServiceCommanderScreen screen(backend, embedded_mode);
 
   rclcpp::executors::SingleThreadedExecutor executor;
@@ -66,10 +70,21 @@ ServiceCommanderScreen::ServiceCommanderScreen(
 
 int ServiceCommanderScreen::run() {
   Session ncurses_session;
-  backend_->refresh_services();
+  backend_->refresh_node_list();
+  backend_->warm_up_node_list();
+
+  if (backend_->view_mode_ == ServiceCommanderViewMode::NodeList && !backend_->target_node_.empty()) {
+    backend_->view_mode_ = ServiceCommanderViewMode::ServiceList;
+    backend_->refresh_services();
+  } else if (backend_->view_mode_ == ServiceCommanderViewMode::NodeList) {
+    backend_->status_line_ = "Choose a node and press Enter.";
+  } else {
+    backend_->refresh_services();
+  }
 
   bool running = true;
   while (running && rclcpp::ok()) {
+    backend_->maybe_refresh_node_list();
     draw();
     const int key = getch();
     if (key == ERR) {
@@ -88,7 +103,67 @@ bool ServiceCommanderScreen::handle_key(int key) {
   if (search_state_.active) {
     return handle_search_key(key);
   }
+
+  switch (key) {
+    case KEY_F(10):
+      return false;
+    case KEY_F(4):
+      if (backend_->view_mode_ == ServiceCommanderViewMode::NodeList) {
+        backend_->refresh_node_list();
+      } else {
+        backend_->refresh_services();
+        if (backend_->view_mode_ == ServiceCommanderViewMode::ServiceDetail) {
+          backend_->reload_selected_service_request();
+        }
+      }
+      return true;
+    case KEY_F(3):
+      if (backend_->view_mode_ == ServiceCommanderViewMode::ServiceDetail) {
+        backend_->reload_selected_service_request();
+        return true;
+      }
+      break;
+    case 27:
+      if (backend_->view_mode_ != ServiceCommanderViewMode::ServiceDetail && is_alt_binding(key, 's')) {
+        start_search(search_state_);
+        backend_->status_line_ = backend_->view_mode_ == ServiceCommanderViewMode::NodeList
+          ? "Search nodes."
+          : "Search services.";
+        return true;
+      }
+      if (backend_->view_mode_ == ServiceCommanderViewMode::ServiceDetail) {
+        backend_->close_service_detail();
+        return true;
+      }
+      if (backend_->view_mode_ == ServiceCommanderViewMode::ServiceList) {
+        if (embedded_mode_) {
+          return false;
+        }
+        backend_->switch_to_node_list();
+        return true;
+      }
+      if (embedded_mode_) {
+        return false;
+      }
+      return true;
+    case '\n':
+    case KEY_ENTER:
+      if (backend_->view_mode_ == ServiceCommanderViewMode::NodeList) {
+        backend_->select_current_node();
+        return true;
+      }
+      if (backend_->view_mode_ == ServiceCommanderViewMode::ServiceList) {
+        backend_->open_selected_service();
+        return true;
+      }
+      break;
+    default:
+      break;
+  }
+
   switch (backend_->view_mode_) {
+    case ServiceCommanderViewMode::NodeList:
+      return handle_node_list_key(key);
     case ServiceCommanderViewMode::ServiceList:
       return handle_service_list_key(key);
     case ServiceCommanderViewMode::ServiceDetail:
@@ -97,24 +172,40 @@ bool ServiceCommanderScreen::handle_key(int key) {
   return true;
 }
 
+bool ServiceCommanderScreen::handle_node_list_key(int key) {
+  if (backend_->node_entries_.empty()) {
+    return true;
+  }
+
+  switch (key) {
+    case KEY_UP:
+    case 'k':
+      if (backend_->selected_node_index_ > 0) {
+        --backend_->selected_node_index_;
+      }
+      return true;
+    case KEY_DOWN:
+    case 'j':
+      if (backend_->selected_node_index_ + 1 < static_cast<int>(backend_->node_entries_.size())) {
+        ++backend_->selected_node_index_;
+      }
+      return true;
+    case KEY_PPAGE:
+      backend_->selected_node_index_ = std::max(0, backend_->selected_node_index_ - page_step());
+      return true;
+    case KEY_NPAGE:
+      backend_->selected_node_index_ = std::min(
+        static_cast<int>(backend_->node_entries_.size()) - 1,
+        backend_->selected_node_index_ + page_step());
+      return true;
+    default:
+      return true;
+  }
+}
+
 bool ServiceCommanderScreen::handle_service_list_key(int key) {
   backend_->clamp_service_selection();
   switch (key) {
-    case KEY_F(10):
-      return false;
-    case KEY_F(4):
-      backend_->refresh_services();
-      return true;
-    case 27:
-      if (is_alt_binding(key, 's')) {
-        start_search(search_state_);
-        backend_->status_line_ = "Search.";
-        return true;
-      }
-      if (embedded_mode_) {
-        return false;
-      }
-      return true;
     case KEY_UP:
     case 'k':
       if (backend_->selected_service_index_ > 0) {
@@ -137,10 +228,6 @@ bool ServiceCommanderScreen::handle_service_list_key(int key) {
           backend_->selected_service_index_ + page_step());
       }
       return true;
-    case '\n':
-    case KEY_ENTER:
-      backend_->open_selected_service();
-      return true;
     default:
       return true;
   }
@@ -157,37 +244,37 @@ bool ServiceCommanderScreen::handle_search_key(int key) {
       search_state_.query.empty() ? "Search closed." : "Search: " + search_state_.query;
     return true;
   }
-  if (result != SearchInputResult::Changed || backend_->view_mode_ != ServiceCommanderViewMode::ServiceList) {
+  if (result != SearchInputResult::Changed) {
     return true;
   }
 
-  std::vector<std::string> labels;
-  labels.reserve(backend_->services_.size());
-  for (const auto & entry : backend_->services_) {
-    labels.push_back(entry.name);
+  if (backend_->view_mode_ == ServiceCommanderViewMode::NodeList) {
+    const int match = find_best_match(
+      backend_->node_entries_, search_state_.query, backend_->selected_node_index_);
+    if (match >= 0) {
+      backend_->selected_node_index_ = match;
+    }
+    backend_->status_line_ = "Search: " + search_state_.query;
+    return true;
   }
-  const int match = find_best_match(labels, search_state_.query, backend_->selected_service_index_);
-  if (match >= 0) {
-    backend_->selected_service_index_ = match;
+
+  if (backend_->view_mode_ == ServiceCommanderViewMode::ServiceList) {
+    std::vector<std::string> labels;
+    labels.reserve(backend_->services_.size());
+    for (const auto & entry : backend_->services_) {
+      labels.push_back(entry.name);
+    }
+    const int match = find_best_match(labels, search_state_.query, backend_->selected_service_index_);
+    if (match >= 0) {
+      backend_->selected_service_index_ = match;
+    }
+    backend_->status_line_ = "Search: " + search_state_.query;
   }
-  backend_->status_line_ = "Search: " + search_state_.query;
   return true;
 }
 
 bool ServiceCommanderScreen::handle_service_detail_key(int key) {
   switch (key) {
-    case KEY_F(10):
-      return false;
-    case 27:
-      backend_->close_service_detail();
-      return true;
-    case KEY_F(4):
-      backend_->refresh_services();
-      backend_->reload_selected_service_request();
-      return true;
-    case KEY_F(3):
-      backend_->reload_selected_service_request();
-      return true;
     case KEY_F(2):
       backend_->call_selected_service();
       return true;
@@ -295,7 +382,9 @@ void ServiceCommanderScreen::draw() {
   attron(theme_attr(kColorTitle));
   mvprintw(0, 1, "Service Commander ");
   attroff(theme_attr(kColorTitle));
-  if (backend_->view_mode_ == ServiceCommanderViewMode::ServiceList) {
+  if (backend_->view_mode_ == ServiceCommanderViewMode::NodeList) {
+    draw_node_list(1, 1, content_bottom - 1, columns - 2);
+  } else if (backend_->view_mode_ == ServiceCommanderViewMode::ServiceList) {
     draw_service_list(1, 1, content_bottom - 1, columns - 2);
   } else {
     draw_service_detail(1, 1, content_bottom - 1, columns - 2);
@@ -307,6 +396,43 @@ void ServiceCommanderScreen::draw() {
     draw_edit_popup(rows, columns);
   }
   refresh();
+}
+
+void ServiceCommanderScreen::draw_node_list(int top, int left, int bottom, int right) {
+  const int visible_rows = std::max(1, bottom - top + 1);
+  const int width = right - left + 1;
+  if (backend_->selected_node_index_ < backend_->node_scroll_) {
+    backend_->node_scroll_ = backend_->selected_node_index_;
+  }
+  if (backend_->selected_node_index_ >= backend_->node_scroll_ + visible_rows - 1) {
+    backend_->node_scroll_ = backend_->selected_node_index_ - visible_rows + 2;
+  }
+
+  attron(theme_attr(kColorHeader));
+  mvprintw(top, left, "%-*s", width, "Discovered Nodes");
+  attroff(theme_attr(kColorHeader));
+
+  for (int row = top + 1; row <= bottom; ++row) {
+    const int entry_index = backend_->node_scroll_ + row - top - 1;
+    mvhline(row, left, ' ', width);
+    if (entry_index < 0 || entry_index >= static_cast<int>(backend_->node_entries_.size())) {
+      continue;
+    }
+
+    const bool selected = entry_index == backend_->selected_node_index_;
+    if (selected) {
+      apply_role_chgat(row, left, width, kColorSelection);
+    }
+    mvprintw(
+      row,
+      left,
+      "%-*s",
+      width,
+      truncate_text(backend_->node_entries_[static_cast<std::size_t>(entry_index)], width).c_str());
+    if (selected) {
+      apply_role_chgat(row, left, width, kColorSelection);
+    }
+  }
 }
 
 void ServiceCommanderScreen::draw_service_list(int top, int left, int bottom, int right) {
@@ -467,9 +593,16 @@ void ServiceCommanderScreen::draw_edit_popup(int rows, int columns) const {
 
 void ServiceCommanderScreen::draw_status_line(int row, int columns) const {
   std::string line = backend_->status_line_;
-  if (backend_->view_mode_ == ServiceCommanderViewMode::ServiceDetail && !backend_->selected_service_.name.empty()) {
+  if (backend_->view_mode_ == ServiceCommanderViewMode::ServiceList && !backend_->target_node_.empty()) {
+    line = truncate_text(backend_->target_node_ + "  " + backend_->status_line_, columns - 2);
+  } else if (
+    backend_->view_mode_ == ServiceCommanderViewMode::ServiceDetail &&
+    !backend_->selected_service_.name.empty())
+  {
     line = truncate_text(
-      backend_->selected_service_.name + " [" + backend_->selected_service_.type + "]  " + backend_->status_line_,
+      backend_->target_node_ + "  " +
+      backend_->selected_service_.name + " [" + backend_->selected_service_.type + "]  " +
+      backend_->status_line_,
       columns - 2);
   }
   draw_status_bar(row, columns, line);
@@ -479,9 +612,11 @@ void ServiceCommanderScreen::draw_help_line(int row, int columns) const {
   const std::string help =
     edit_popup_open_
     ? "F2 Save  Enter Save  Esc Close  F10 Exit"
-    : backend_->view_mode_ == ServiceCommanderViewMode::ServiceDetail
-    ? "Enter Edit  F2 Call  F3 Reset  F4 Refresh  Esc Back  F10 Exit"
-    : "Enter Inspect  Alt+S Search  F4 Refresh  F10 Exit";
+    : backend_->view_mode_ == ServiceCommanderViewMode::NodeList
+    ? "Enter Open  Alt+S Search  F4 Refresh  F10 Exit"
+    : backend_->view_mode_ == ServiceCommanderViewMode::ServiceList
+    ? "Enter Inspect  Alt+S Search  F4 Refresh  Esc Back  F10 Exit"
+    : "Enter Edit  F2 Call  F3 Reset  F4 Refresh  Esc Back  F10 Exit";
   draw_help_bar(row, columns, truncate_text(help, columns - 1));
 }
 

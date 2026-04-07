@@ -28,11 +28,22 @@
 #include <utility>
 #include <vector>
 #include <optional>
+#include <set>
 
 #include "ros2_console_tools/tui.hpp"
 
 namespace ros2_console_tools {
 
+struct TopicMonitorLaunchOptions {
+  std::string initial_topic;
+  std::vector<std::string> allowed_topics;
+  bool embedded_mode{false};
+  bool open_initial_topic_detail{false};
+  bool monitor_allowed_topics_on_start{false};
+  bool exit_on_detail_escape{false};
+};
+
+int run_topic_monitor_tool(const TopicMonitorLaunchOptions & options);
 int run_topic_monitor_tool(const std::string & initial_topic = "", bool embedded_mode = false);
 
 using TopicClock = std::chrono::steady_clock;
@@ -175,7 +186,7 @@ class TopicMonitorScreen;
 
 class TopicMonitorBackend : public rclcpp::Node {
 public:
-  explicit TopicMonitorBackend(const std::string & initial_topic = "");
+  explicit TopicMonitorBackend(const TopicMonitorLaunchOptions & options = {});
 
 private:
   friend class TopicMonitorScreen;
@@ -184,6 +195,7 @@ private:
   static constexpr auto kStaleAfter = std::chrono::milliseconds(1500);
 
   void refresh_topics();
+  void apply_startup_behavior();
   void warm_up_topic_list();
   void maybe_refresh_topics();
   std::vector<TopicRow> topic_rows_snapshot() const;
@@ -197,6 +209,8 @@ private:
   void toggle_selected_topic_monitoring();
   void open_selected_topic_detail();
   void close_topic_detail();
+  rclcpp::QoS subscription_qos_for_topic(const std::string & topic_name) const;
+  rclcpp::QoS compatible_subscription_qos(const std::vector<rclcpp::QoS> & publisher_qos_profiles) const;
   void start_monitoring(const TopicEntry & entry);
   void stop_monitoring(const std::string & topic_name);
   void on_message(const std::string & topic_name, const rclcpp::SerializedMessage & message);
@@ -229,7 +243,8 @@ private:
   bool selected_detail_row_can_plot() const;
   std::optional<DetailRow> selected_visible_detail_row() const;
   bool detail_row_has_children(const std::vector<DetailRow> & rows, std::size_t index) const;
-  void select_initial_topic_if_present();
+  bool topic_is_allowed(const std::string & topic_name) const;
+  bool select_initial_topic_if_present();
   void expand_topic_namespace_path(const std::string & namespace_path);
 
   mutable std::mutex mutex_;
@@ -238,7 +253,12 @@ private:
   std::map<std::string, bool> collapsed_topic_namespaces_;
   std::vector<std::pair<std::string, rclcpp::GenericSubscription::SharedPtr>> monitored_subscriptions_;
   TopicMonitorViewMode view_mode_{TopicMonitorViewMode::TopicList};
+  std::set<std::string> allowed_topic_names_;
   std::string initial_topic_name_;
+  bool open_initial_topic_detail_{false};
+  bool monitor_allowed_topics_on_start_{false};
+  bool exit_on_detail_escape_{false};
+  bool pending_namespace_expansion_{false};
   int selected_index_{0};
   int list_scroll_{0};
   int selected_detail_index_{0};

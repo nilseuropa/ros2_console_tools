@@ -7,9 +7,9 @@
 
 namespace ros2_console_tools {
 
-int run_topic_monitor_tool(const std::string & initial_topic, bool embedded_mode) {
-  auto backend = std::make_shared<TopicMonitorBackend>(initial_topic);
-  TopicMonitorScreen screen(backend, embedded_mode);
+int run_topic_monitor_tool(const TopicMonitorLaunchOptions & options) {
+  auto backend = std::make_shared<TopicMonitorBackend>(options);
+  TopicMonitorScreen screen(backend, options.embedded_mode);
 
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(backend);
@@ -22,6 +22,13 @@ int run_topic_monitor_tool(const std::string & initial_topic, bool embedded_mode
     spin_thread.join();
   }
   return result;
+}
+
+int run_topic_monitor_tool(const std::string & initial_topic, bool embedded_mode) {
+  TopicMonitorLaunchOptions options;
+  options.initial_topic = initial_topic;
+  options.embedded_mode = embedded_mode;
+  return run_topic_monitor_tool(options);
 }
 
 namespace {
@@ -222,6 +229,9 @@ bool TopicMonitorScreen::handle_topic_detail_key(int key) {
     case KEY_F(3):
       return launch_selected_plot();
     case 27:
+      if (embedded_mode_ && backend_->exit_on_detail_escape_) {
+        return false;
+      }
       backend_->close_topic_detail();
       return true;
     case KEY_F(4):
@@ -570,7 +580,9 @@ void TopicMonitorScreen::draw_status_line(int row, int columns) const {
 void TopicMonitorScreen::draw_help_line(int row, int columns) const {
   const std::string help =
     backend_->view_mode_ == TopicMonitorViewMode::TopicDetail
-    ? "F2 Visualize  F3 Plot  Left/Right Fold  Esc Back  F4 Refresh  F10 Exit"
+    ? (embedded_mode_ && backend_->exit_on_detail_escape_
+      ? "F2 Visualize  F3 Plot  Left/Right Fold  Esc Return  F4 Refresh  F10 Exit"
+      : "F2 Visualize  F3 Plot  Left/Right Fold  Esc Back  F4 Refresh  F10 Exit")
     : "Enter Inspect  F2 Visualize  Alt+S Search  Space Mark  F4 Refresh  F5 Filter  F10 Exit";
   draw_help_bar(row, columns, help);
 }

@@ -2,9 +2,14 @@
 
 namespace ros2_console_tools {
 
-TopicMonitorBackend::TopicMonitorBackend(const std::string & initial_topic)
+TopicMonitorBackend::TopicMonitorBackend(const TopicMonitorLaunchOptions & options)
 : Node("topic_monitor"),
-  initial_topic_name_(initial_topic)
+  allowed_topic_names_(options.allowed_topics.begin(), options.allowed_topics.end()),
+  initial_topic_name_(options.initial_topic),
+  open_initial_topic_detail_(options.open_initial_topic_detail),
+  monitor_allowed_topics_on_start_(options.monitor_allowed_topics_on_start),
+  exit_on_detail_escape_(options.exit_on_detail_escape),
+  pending_namespace_expansion_(!options.allowed_topics.empty() || !options.initial_topic.empty())
 {
   const std::string theme_config_path =
     this->declare_parameter<std::string>("theme_config_path", tui::default_theme_config_path());
@@ -23,7 +28,7 @@ void TopicMonitorBackend::refresh_topics() {
     std::lock_guard<std::mutex> lock(mutex_);
     std::map<std::string, TopicEntry> refreshed;
     for (const auto & [name, types] : discovered_topics) {
-      if (name.empty()) {
+      if (name.empty() || !topic_is_allowed(name)) {
         continue;
       }
 
@@ -48,15 +53,82 @@ void TopicMonitorBackend::refresh_topics() {
 
     selected_index_ = std::clamp(selected_index_, 0, std::max(0, static_cast<int>(topics_.size()) - 1));
     last_refresh_time_ = TopicClock::now();
-    status_line_ = "Loaded " + std::to_string(topics_.size()) + " topics. Space monitors the selected topic.";
+    status_line_ =
+      std::string(allowed_topic_names_.empty() ? "Loaded " : "Loaded filtered ")
+      + std::to_string(topics_.size())
+      + (topics_.size() == 1 ? " topic. Space monitors the selected topic." : " topics. Space monitors the selected topic.");
   }
 
-  select_initial_topic_if_present();
+  apply_startup_behavior();
 }
 
-void TopicMonitorBackend::select_initial_topic_if_present() {
-  if (initial_topic_name_.empty()) {
+void TopicMonitorBackend::apply_startup_behavior() {
+  if (pending_namespace_expansion_) {
+    if (!initial_topic_name_.empty()) {
+      expand_topic_namespace_path(topic_namespace(initial_topic_name_));
+    }
+    for (const auto & topic_name : allowed_topic_names_) {
+      expand_topic_namespace_path(topic_namespace(topic_name));
+    }
+    pending_namespace_expansion_ = false;
+  }
+
+  if (open_initial_topic_detail_) {
+    if (select_initial_topic_if_present()) {
+      open_selected_topic_detail();
+      open_initial_topic_detail_ = false;
+    }
+  } else {
+    (void)select_initial_topic_if_present();
+  }
+
+  if (!monitor_allowed_topics_on_start_) {
     return;
+  }
+
+  bool all_allowed_topics_found = allowed_topic_names_.empty();
+  std::vector<TopicEntry> topics_to_monitor;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!allowed_topic_names_.empty()) {
+      all_allowed_topics_found = true;
+      for (const auto & topic_name : allowed_topic_names_) {
+        const auto found = topics_.find(topic_name);
+        if (found == topics_.end()) {
+          all_allowed_topics_found = false;
+          continue;
+        }
+        if (!found->second.monitored) {
+          topics_to_monitor.push_back(found->second);
+        }
+      }
+    }
+  }
+
+  for (const auto & topic : topics_to_monitor) {
+    start_monitoring(topic);
+  }
+
+  if (!topics_to_monitor.empty()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    status_line_ =
+      topics_to_monitor.size() == 1
+      ? "Monitoring filtered topic " + topics_to_monitor.front().name + "."
+      : "Monitoring " + std::to_string(topics_to_monitor.size()) + " filtered topics.";
+  }
+
+  if (all_allowed_topics_found) {
+    monitor_allowed_topics_on_start_ = false;
+  }
+}
+
+bool TopicMonitorBackend::topic_is_allowed(const std::string & topic_name) const {
+  return allowed_topic_names_.empty() || allowed_topic_names_.find(topic_name) != allowed_topic_names_.end();
+}
+
+bool TopicMonitorBackend::select_initial_topic_if_present() {
+  if (initial_topic_name_.empty()) {
+    return false;
   }
 
   expand_topic_namespace_path(topic_namespace(initial_topic_name_));
@@ -65,9 +137,10 @@ void TopicMonitorBackend::select_initial_topic_if_present() {
     if (!items[index].is_namespace && items[index].row.name == initial_topic_name_) {
       selected_index_ = static_cast<int>(index);
       initial_topic_name_.clear();
-      return;
+      return true;
     }
   }
+  return false;
 }
 
 void TopicMonitorBackend::expand_topic_namespace_path(const std::string & namespace_path) {
@@ -316,12 +389,68 @@ void TopicMonitorBackend::close_topic_detail() {
   status_line_ = "Returned to topic list.";
 }
 
+rclcpp::QoS TopicMonitorBackend::subscription_qos_for_topic(const std::string & topic_name) const {
+  try {
+    const auto publishers = this->get_publishers_info_by_topic(topic_name);
+    std::vector<rclcpp::QoS> publisher_qos_profiles;
+    publisher_qos_profiles.reserve(publishers.size());
+    for (const auto & publisher : publishers) {
+      publisher_qos_profiles.push_back(publisher.qos_profile());
+    }
+    return compatible_subscription_qos(publisher_qos_profiles);
+  } catch (const std::exception &) {
+    return compatible_subscription_qos({});
+  }
+}
+
+rclcpp::QoS TopicMonitorBackend::compatible_subscription_qos(
+  const std::vector<rclcpp::QoS> & publisher_qos_profiles) const
+{
+  std::size_t depth = 10;
+  bool require_best_effort = false;
+  bool require_volatile = false;
+  bool saw_transient_local = false;
+
+  for (const auto & publisher_qos : publisher_qos_profiles) {
+    if (publisher_qos.history() == rclcpp::HistoryPolicy::KeepLast) {
+      depth = std::max(depth, publisher_qos.depth());
+    }
+
+    if (publisher_qos.reliability() != rclcpp::ReliabilityPolicy::Reliable) {
+      require_best_effort = true;
+    }
+
+    if (publisher_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal) {
+      saw_transient_local = true;
+    } else {
+      require_volatile = true;
+    }
+  }
+
+  rclcpp::QoS qos{rclcpp::KeepLast(depth)};
+  if (require_best_effort) {
+    qos.best_effort();
+  } else {
+    qos.reliable();
+  }
+
+  if (saw_transient_local && !require_volatile) {
+    qos.transient_local();
+  } else {
+    qos.durability_volatile();
+  }
+
+  qos.liveliness(rclcpp::LivelinessPolicy::Automatic);
+  return qos;
+}
+
 void TopicMonitorBackend::start_monitoring(const TopicEntry & entry) {
   try {
+    const auto subscription_qos = subscription_qos_for_topic(entry.name);
     auto subscription = this->create_generic_subscription(
       entry.name,
       entry.type,
-      rclcpp::QoS(rclcpp::KeepLast(10)),
+      subscription_qos,
       [this, topic_name = entry.name](std::shared_ptr<rclcpp::SerializedMessage> message) {
         on_message(topic_name, *message);
       });
