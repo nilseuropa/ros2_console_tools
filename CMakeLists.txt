@@ -330,6 +330,20 @@ if(BUILD_TESTING)
       tf_monitor_lib
     )
   endif()
+
+  ament_add_gtest(tui_test
+    test/tui_test.cpp
+    src/tui.cpp
+  )
+  if(TARGET tui_test)
+    ament_target_dependencies(tui_test
+      ament_index_cpp
+    )
+    target_include_directories(tui_test PRIVATE ${CURSES_INCLUDE_DIR} include)
+    target_link_libraries(tui_test
+      ${NCURSESW_LIBRARY}
+    )
+  endif()
 endif()
 
 ament_package()

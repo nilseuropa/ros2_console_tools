@@ -308,6 +308,7 @@ private:
   bool popup_dirty_{false};
   tui::SearchState search_state_;
   std::string popup_buffer_;
+  tui::TerminalPane terminal_pane_;
 };
 
 }  // namespace ros2_console_tools

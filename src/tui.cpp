@@ -4,13 +4,23 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <clocale>
+#include <csignal>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <fcntl.h>
 #include <langinfo.h>
 #include <map>
+#include <poll.h>
 #include <sstream>
+#include <stdlib.h>
 #include <string>
+#include <sys/ioctl.h>
+#include <sys/wait.h>
+#include <termios.h>
+#include <unistd.h>
 #include <vector>
 
 namespace ros2_console_tools::tui {
@@ -18,6 +28,7 @@ namespace ros2_console_tools::tui {
 namespace {
 
 Theme g_theme = make_default_theme();
+constexpr std::size_t kTerminalScrollbackLimit = 2000;
 
 struct HelpBlock {
   std::string key;
@@ -382,6 +393,457 @@ Session::Session() {
 Session::~Session() {
   curs_set(1);
   endwin();
+}
+
+TerminalPane::TerminalPane() = default;
+
+TerminalPane::~TerminalPane() {
+  shutdown_process();
+}
+
+bool TerminalPane::visible() const {
+  return visible_;
+}
+
+void TerminalPane::toggle() {
+  if (visible_) {
+    hide();
+  } else {
+    show();
+  }
+}
+
+void TerminalPane::show() {
+  visible_ = true;
+  ensure_process();
+}
+
+void TerminalPane::hide() {
+  visible_ = false;
+}
+
+void TerminalPane::update() {
+  reap_process();
+  if (master_fd_ < 0) {
+    return;
+  }
+
+  char buffer[1024];
+  while (true) {
+    const ssize_t bytes_read = ::read(master_fd_, buffer, sizeof(buffer));
+    if (bytes_read > 0) {
+      for (ssize_t index = 0; index < bytes_read; ++index) {
+        process_output_char(buffer[index]);
+      }
+      continue;
+    }
+    if (bytes_read == 0) {
+      reap_process();
+      break;
+    }
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      break;
+    }
+    if (errno == EINTR) {
+      continue;
+    }
+    append_line("Terminal read failed.");
+    shutdown_process();
+    break;
+  }
+}
+
+bool TerminalPane::handle_key(int key) {
+  if (!visible_) {
+    return false;
+  }
+
+  ensure_process();
+  if (master_fd_ < 0) {
+    return true;
+  }
+
+  const std::string encoded = encode_key(key);
+  if (encoded.empty()) {
+    return true;
+  }
+
+  const char * data = encoded.data();
+  std::size_t remaining = encoded.size();
+  while (remaining > 0) {
+    const ssize_t written = ::write(master_fd_, data, remaining);
+    if (written > 0) {
+      data += written;
+      remaining -= static_cast<std::size_t>(written);
+      continue;
+    }
+    if (written == -1 && errno == EINTR) {
+      continue;
+    }
+    if (written == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      break;
+    }
+    append_line("Terminal write failed.");
+    shutdown_process();
+    break;
+  }
+  return true;
+}
+
+void TerminalPane::draw(int top, int left, int bottom, int right) {
+  if (!visible_ || top >= bottom || left >= right) {
+    return;
+  }
+
+  const int inner_rows = std::max(1, bottom - top - 1);
+  const int inner_columns = std::max(1, right - left - 1);
+  resize_pty(inner_rows, inner_columns);
+
+  draw_box(top, left, bottom, right, kColorFrame);
+  attron(theme_attr(kColorHeader));
+  mvprintw(top, left + 2, " Terminal ");
+  attroff(theme_attr(kColorHeader));
+
+  for (int row = top + 1; row < bottom; ++row) {
+    attron(COLOR_PAIR(kColorPopup));
+    mvhline(row, left + 1, ' ', inner_columns);
+    attroff(COLOR_PAIR(kColorPopup));
+  }
+
+  std::vector<std::string> lines;
+  lines.reserve(scrollback_.size() + (current_line_.empty() ? 0 : 1));
+  lines.insert(lines.end(), scrollback_.begin(), scrollback_.end());
+  if (!current_line_.empty()) {
+    lines.push_back(current_line_);
+  }
+
+  const int first_line = std::max(0, static_cast<int>(lines.size()) - inner_rows);
+  for (int row = 0; row < inner_rows; ++row) {
+    const int line_index = first_line + row;
+    if (line_index >= static_cast<int>(lines.size())) {
+      continue;
+    }
+    mvaddnstr(
+      top + 1 + row,
+      left + 1,
+      truncate_text(lines[static_cast<std::size_t>(line_index)], inner_columns).c_str(),
+      inner_columns);
+  }
+}
+
+void TerminalPane::ensure_process() {
+  reap_process();
+  if (child_running_) {
+    return;
+  }
+  spawn_process();
+}
+
+void TerminalPane::spawn_process() {
+  shutdown_process();
+
+  const int master_fd = posix_openpt(O_RDWR | O_NOCTTY);
+  if (master_fd == -1) {
+    append_line("Failed to open pseudo terminal.");
+    return;
+  }
+  if (grantpt(master_fd) != 0 || unlockpt(master_fd) != 0) {
+    ::close(master_fd);
+    append_line("Failed to initialize pseudo terminal.");
+    return;
+  }
+
+  char * slave_name = ptsname(master_fd);
+  if (slave_name == nullptr) {
+    ::close(master_fd);
+    append_line("Failed to resolve pseudo terminal path.");
+    return;
+  }
+
+  const pid_t child_pid = fork();
+  if (child_pid == -1) {
+    ::close(master_fd);
+    append_line("Failed to fork shell.");
+    return;
+  }
+
+  if (child_pid == 0) {
+    setsid();
+    const int slave_fd = ::open(slave_name, O_RDWR);
+    if (slave_fd == -1) {
+      _exit(127);
+    }
+
+    if (ioctl(slave_fd, TIOCSCTTY, 0) == -1) {
+      ::close(slave_fd);
+      _exit(127);
+    }
+
+    dup2(slave_fd, STDIN_FILENO);
+    dup2(slave_fd, STDOUT_FILENO);
+    dup2(slave_fd, STDERR_FILENO);
+    if (slave_fd > STDERR_FILENO) {
+      ::close(slave_fd);
+    }
+    ::close(master_fd);
+
+    const char * shell = std::getenv("SHELL");
+    if (shell == nullptr || *shell == '\0') {
+      shell = "/bin/bash";
+    }
+    execlp(shell, shell, "-i", static_cast<char *>(nullptr));
+    execl("/bin/sh", "sh", "-i", static_cast<char *>(nullptr));
+    _exit(127);
+  }
+
+  const int flags = fcntl(master_fd, F_GETFL, 0);
+  if (flags >= 0) {
+    fcntl(master_fd, F_SETFL, flags | O_NONBLOCK);
+  }
+
+  master_fd_ = master_fd;
+  child_pid_ = child_pid;
+  child_running_ = true;
+  escape_mode_ = EscapeMode::None;
+  osc_saw_escape_ = false;
+  current_line_.clear();
+  scrollback_.clear();
+  append_line("Shell started.");
+}
+
+void TerminalPane::shutdown_process() {
+  if (master_fd_ >= 0) {
+    ::close(master_fd_);
+    master_fd_ = -1;
+  }
+
+  if (child_pid_ > 0) {
+    int status = 0;
+    if (waitpid(child_pid_, &status, WNOHANG) == 0) {
+      kill(child_pid_, SIGHUP);
+      for (int attempt = 0; attempt < 10; ++attempt) {
+        if (waitpid(child_pid_, &status, WNOHANG) != 0) {
+          break;
+        }
+        napms(20);
+      }
+      if (waitpid(child_pid_, &status, WNOHANG) == 0) {
+        kill(child_pid_, SIGKILL);
+        waitpid(child_pid_, &status, 0);
+      }
+    }
+  }
+
+  child_pid_ = -1;
+  child_running_ = false;
+  last_rows_ = 0;
+  last_columns_ = 0;
+  escape_mode_ = EscapeMode::None;
+  osc_saw_escape_ = false;
+}
+
+void TerminalPane::reap_process() {
+  if (child_pid_ <= 0) {
+    return;
+  }
+
+  int status = 0;
+  const pid_t wait_result = waitpid(child_pid_, &status, WNOHANG);
+  if (wait_result == 0 || wait_result == -1) {
+    return;
+  }
+
+  if (WIFEXITED(status)) {
+    append_line("Shell exited with code " + std::to_string(WEXITSTATUS(status)) + ".");
+  } else if (WIFSIGNALED(status)) {
+    append_line("Shell terminated by signal " + std::to_string(WTERMSIG(status)) + ".");
+  } else {
+    append_line("Shell terminated.");
+  }
+
+  if (master_fd_ >= 0) {
+    ::close(master_fd_);
+    master_fd_ = -1;
+  }
+  child_pid_ = -1;
+  child_running_ = false;
+  last_rows_ = 0;
+  last_columns_ = 0;
+  escape_mode_ = EscapeMode::None;
+  osc_saw_escape_ = false;
+}
+
+void TerminalPane::resize_pty(int rows, int columns) {
+  if (master_fd_ < 0 || rows <= 0 || columns <= 0) {
+    return;
+  }
+  if (rows == last_rows_ && columns == last_columns_) {
+    return;
+  }
+
+  winsize size{};
+  size.ws_row = static_cast<unsigned short>(rows);
+  size.ws_col = static_cast<unsigned short>(columns);
+  ioctl(master_fd_, TIOCSWINSZ, &size);
+  if (child_pid_ > 0) {
+    kill(child_pid_, SIGWINCH);
+  }
+  last_rows_ = rows;
+  last_columns_ = columns;
+}
+
+void TerminalPane::append_line(const std::string & line) {
+  scrollback_.push_back(line);
+  while (scrollback_.size() > kTerminalScrollbackLimit) {
+    scrollback_.pop_front();
+  }
+}
+
+void TerminalPane::process_output_char(char byte) {
+  switch (escape_mode_) {
+    case EscapeMode::Escape:
+      if (byte == '[') {
+        escape_mode_ = EscapeMode::Csi;
+      } else if (byte == ']') {
+        escape_mode_ = EscapeMode::Osc;
+        osc_saw_escape_ = false;
+      } else {
+        escape_mode_ = EscapeMode::None;
+      }
+      return;
+    case EscapeMode::Csi:
+      if (byte >= '@' && byte <= '~') {
+        escape_mode_ = EscapeMode::None;
+      }
+      return;
+    case EscapeMode::Osc:
+      if (byte == '\a') {
+        escape_mode_ = EscapeMode::None;
+        osc_saw_escape_ = false;
+        return;
+      }
+      if (osc_saw_escape_ && byte == '\\') {
+        escape_mode_ = EscapeMode::None;
+        osc_saw_escape_ = false;
+        return;
+      }
+      osc_saw_escape_ = byte == '\x1b';
+      return;
+    case EscapeMode::None:
+      break;
+  }
+
+  if (byte == '\x1b') {
+    escape_mode_ = EscapeMode::Escape;
+    return;
+  }
+  if (byte == '\r') {
+    current_line_.clear();
+    return;
+  }
+  if (byte == '\n') {
+    append_line(current_line_);
+    current_line_.clear();
+    return;
+  }
+  if (byte == '\b' || byte == 127) {
+    if (!current_line_.empty()) {
+      current_line_.pop_back();
+    }
+    return;
+  }
+  if (byte == '\t') {
+    current_line_ += "  ";
+    return;
+  }
+  if (static_cast<unsigned char>(byte) < 32U) {
+    return;
+  }
+  current_line_.push_back(byte);
+}
+
+std::string TerminalPane::encode_key(int key) const {
+  switch (key) {
+    case '\n':
+    case KEY_ENTER:
+      return "\r";
+    case '\t':
+      return "\t";
+    case 27:
+      return "\x1b";
+    case KEY_UP:
+      return "\x1b[A";
+    case KEY_DOWN:
+      return "\x1b[B";
+    case KEY_RIGHT:
+      return "\x1b[C";
+    case KEY_LEFT:
+      return "\x1b[D";
+    case KEY_HOME:
+      return "\x1b[H";
+    case KEY_END:
+      return "\x1b[F";
+    case KEY_PPAGE:
+      return "\x1b[5~";
+    case KEY_NPAGE:
+      return "\x1b[6~";
+    case KEY_DC:
+      return "\x1b[3~";
+    case KEY_IC:
+      return "\x1b[2~";
+    case KEY_BACKSPACE:
+    case 127:
+    case '\b':
+      return "\x7f";
+    case KEY_F(1):
+      return "\x1bOP";
+    case KEY_F(2):
+      return "\x1bOQ";
+    case KEY_F(3):
+      return "\x1bOR";
+    case KEY_F(4):
+      return "\x1bOS";
+    case KEY_F(5):
+      return "\x1b[15~";
+    case KEY_F(6):
+      return "\x1b[17~";
+    case KEY_F(7):
+      return "\x1b[18~";
+    case KEY_F(8):
+      return "\x1b[19~";
+    case KEY_F(11):
+      return "\x1b[23~";
+    case KEY_F(12):
+      return "\x1b[24~";
+    case KEY_RESIZE:
+      return "";
+    default:
+      break;
+  }
+
+  if (key >= 1 && key <= 26) {
+    return std::string(1, static_cast<char>(key));
+  }
+  if (key >= 32 && key <= 255) {
+    return std::string(1, static_cast<char>(key));
+  }
+  return "";
+}
+
+CommanderLayout make_commander_layout(int rows, bool terminal_visible) {
+  CommanderLayout layout;
+  layout.terminal_visible = terminal_visible;
+  layout.terminal_top = terminal_visible ? std::max(4, rows / 2) : rows;
+  layout.pane_rows = terminal_visible ? layout.terminal_top : rows;
+  layout.help_row = std::max(0, layout.pane_rows - 1);
+  layout.status_row = std::max(0, layout.pane_rows - 2);
+  layout.content_bottom = std::max(1, layout.status_row - 1);
+  return layout;
+}
+
+std::string with_terminal_help(const std::string & text, bool terminal_visible) {
+  const std::string suffix = terminal_visible ? "F9 Hide" : "F9 Terminal";
+  return text.empty() ? suffix : (text + "  " + suffix);
 }
 
 std::string truncate_text(const std::string & text, int width) {

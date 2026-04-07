@@ -97,6 +97,7 @@ private:
   std::shared_ptr<ActionCommanderBackend> backend_;
   bool embedded_mode_{false};
   tui::SearchState search_state_;
+  tui::TerminalPane terminal_pane_;
 };
 
 }  // namespace ros2_console_tools

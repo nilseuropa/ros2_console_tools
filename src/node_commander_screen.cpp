@@ -147,6 +147,7 @@ int NodeCommanderScreen::run() {
   bool running = true;
   while (running && rclcpp::ok()) {
     backend_->maybe_refresh_nodes();
+    terminal_pane_.update();
     draw();
     const int key = getch();
     if (key == ERR) {
@@ -172,6 +173,17 @@ bool NodeCommanderScreen::handle_key(int key) {
       default:
         return true;
     }
+  }
+  if (key == KEY_F(9)) {
+    search_state_.active = false;
+    terminal_pane_.toggle();
+    return true;
+  }
+  if (terminal_pane_.visible()) {
+    if (key == KEY_F(10)) {
+      return false;
+    }
+    return terminal_pane_.handle_key(key);
   }
 
   if (search_state_.active) {
@@ -693,9 +705,10 @@ void NodeCommanderScreen::draw() {
   int rows = 0;
   int columns = 0;
   getmaxyx(stdscr, rows, columns);
-  const int help_row = rows - 1;
-  const int status_row = rows - 2;
-  const int content_bottom = rows - 3;
+  const auto layout = tui::make_commander_layout(rows, terminal_pane_.visible());
+  const int help_row = layout.help_row;
+  const int status_row = layout.status_row;
+  const int content_bottom = layout.content_bottom;
 
   draw_box(0, 0, content_bottom, columns - 1, kColorFrame);
   attron(theme_attr(kColorTitle));
@@ -711,10 +724,10 @@ void NodeCommanderScreen::draw() {
   draw_detail_pane(1, separator_x + 1, content_bottom - 1, columns - 2);
   draw_status_line(status_row, columns);
   draw_help_line(help_row, columns);
-  draw_search_box(rows, columns, search_state_);
+  draw_search_box(layout.pane_rows, columns, search_state_);
   if (help_popup_open_) {
     const int popup_width = std::min(columns - 8, 76);
-    const int popup_height = 16;
+    const int popup_height = 17;
     const int popup_left = std::max(2, (columns - popup_width) / 2);
     const int popup_top = std::max(1, (rows - popup_height) / 2);
     const int popup_right = popup_left + popup_width - 1;
@@ -755,7 +768,11 @@ void NodeCommanderScreen::draw() {
     draw_help_item(popup_top + 11, "F6", "action_commander");
     draw_help_item(popup_top + 12, "F7", "tf_monitor");
     draw_help_item(popup_top + 13, "F8", "urdf_inspector");
-    draw_help_item(popup_top + 14, "Esc/F1", "close help");
+    draw_help_item(popup_top + 14, "F9", "toggle terminal");
+    draw_help_item(popup_top + 15, "Esc/F1", "close help");
+  }
+  if (terminal_pane_.visible()) {
+    terminal_pane_.draw(layout.terminal_top, 0, rows - 1, columns - 1);
   }
   refresh();
 }
@@ -871,8 +888,11 @@ void NodeCommanderScreen::draw_status_line(int row, int columns) const {
 
 void NodeCommanderScreen::draw_help_line(int row, int columns) const {
   draw_help_bar(
-    row, columns,
-    "F1 Help  F2 Logs  F3 Topics  F4 Node Params  F5 Node Services  F6 Actions  F7 Transforms  F8 URDF  Alt+S Search  F10 Exit");
+    row,
+    columns,
+    tui::with_terminal_help(
+      "F1 Help  F2 Logs  F3 Topics  F4 Node Params  F5 Node Services  F6 Actions  F7 Transforms  F8 URDF  Alt+S Search  F10 Exit",
+      terminal_pane_.visible()));
 }
 
 }  // namespace ros2_console_tools
