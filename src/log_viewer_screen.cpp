@@ -76,6 +76,7 @@ int LogViewerScreen::run() {
 
   bool running = true;
   while (running && rclcpp::ok()) {
+    terminal_pane_.update();
     draw();
     const int key = getch();
     if (key == ERR) {
@@ -91,14 +92,25 @@ bool LogViewerScreen::handle_key(int key) {
   if (backend_->filter_prompt_open_) {
     return handle_filter_prompt_key(key);
   }
+  if (backend_->detail_popup_open_) {
+    return handle_detail_popup_key(key);
+  }
+  if (is_alt_binding(key, 't')) {
+    search_state_.active = false;
+    terminal_pane_.toggle();
+    return true;
+  }
+  if (terminal_pane_.visible()) {
+    if (key == KEY_F(10)) {
+      return false;
+    }
+    return terminal_pane_.handle_key(key);
+  }
   if (search_state_.active) {
     return handle_search_key(key);
   }
   if (backend_->view_mode_ == LogViewerViewMode::CodeInspect) {
     return handle_code_view_key(key);
-  }
-  if (backend_->detail_popup_open_) {
-    return handle_detail_popup_key(key);
   }
 
   switch (key) {
@@ -429,9 +441,10 @@ void LogViewerScreen::draw() {
   int rows = 0;
   int columns = 0;
   getmaxyx(stdscr, rows, columns);
-  const int help_row = rows - 1;
-  const int status_row = rows - 2;
-  const int content_bottom = std::max(1, status_row - 1);
+  const auto layout = tui::make_commander_layout(rows, terminal_pane_.visible());
+  const int help_row = layout.help_row;
+  const int status_row = layout.status_row;
+  const int content_bottom = layout.content_bottom;
 
   draw_box(0, 0, content_bottom, columns - 1, kColorFrame);
   attron(theme_attr(kColorTitle));
@@ -455,7 +468,10 @@ void LogViewerScreen::draw() {
   if (backend_->detail_popup_open_) {
     draw_detail_popup(rows, columns);
   }
-  draw_search_box(rows, columns, search_state_);
+  draw_search_box(layout.pane_rows, columns, search_state_);
+  if (terminal_pane_.visible()) {
+    terminal_pane_.draw(layout.terminal_top, 0, rows - 1, columns - 1);
+  }
 
   refresh();
 }
@@ -809,7 +825,7 @@ void LogViewerScreen::draw_help_line(int row, int columns) const {
     : backend_->view_mode_ == LogViewerViewMode::SourceLive
     ? "Enter Inspect  Alt+S Search  Esc Back  F4 Refresh  F6 Level  / Filter  F10 Exit"
     : "Tab Pane  Space Mark  Enter Open  Alt+S Search  F4 Refresh  F5 Hide Unselected  F6 Level  / Filter  F10 Exit";
-  draw_help_bar(row, columns, help);
+  draw_help_bar(row, columns, tui::with_terminal_help(help, terminal_pane_.visible()));
 }
 
 void LogViewerScreen::draw_detail_popup(int rows, int columns) const {

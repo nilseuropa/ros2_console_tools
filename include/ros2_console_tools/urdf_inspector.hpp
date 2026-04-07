@@ -159,6 +159,7 @@ private:
   int popup_scroll_{0};
   std::string popup_title_;
   std::vector<std::string> popup_lines_;
+  tui::TerminalPane terminal_pane_;
 };
 
 }  // namespace ros2_console_tools

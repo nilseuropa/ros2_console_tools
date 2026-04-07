@@ -4,7 +4,9 @@
 #include <ncursesw/ncurses.h>
 
 #include <array>
+#include <deque>
 #include <string>
+#include <sys/types.h>
 #include <vector>
 
 namespace ros2_console_tools::tui {
@@ -44,6 +46,15 @@ struct SearchState {
   std::string query;
 };
 
+struct CommanderLayout {
+  bool terminal_visible{false};
+  int pane_rows{0};
+  int content_bottom{0};
+  int status_row{0};
+  int help_row{0};
+  int terminal_top{0};
+};
+
 enum class TerminalContext {
   Color,
   Mono,
@@ -66,6 +77,83 @@ public:
   Session & operator=(const Session &) = delete;
 };
 
+class TerminalPane {
+public:
+  TerminalPane();
+  ~TerminalPane();
+
+  TerminalPane(const TerminalPane &) = delete;
+  TerminalPane & operator=(const TerminalPane &) = delete;
+
+  bool visible() const;
+  void toggle();
+  void show();
+  void hide();
+  void update();
+  bool handle_key(int key);
+  void draw(int top, int left, int bottom, int right);
+
+private:
+  struct TerminalStyle {
+    short foreground{COLOR_WHITE};
+    short background{-1};
+    int attributes{A_NORMAL};
+  };
+
+  struct TerminalCell {
+    char glyph{' '};
+    TerminalStyle style{};
+  };
+
+  enum class EscapeMode {
+    None,
+    Escape,
+    Csi,
+    Osc,
+  };
+
+  void ensure_process();
+  void spawn_process();
+  void shutdown_process();
+  void reap_process();
+  void resize_pty(int rows, int columns);
+  void resize_screen_buffer(int rows, int columns);
+  void append_status_message(const std::string & line);
+  void process_output_char(char byte);
+  void handle_csi_sequence(char final_byte, const std::string & sequence);
+  void apply_sgr(const std::vector<int> & params);
+  void put_printable(char byte);
+  void newline();
+  void scroll_up(int count = 1);
+  void clear_row(int row);
+  void clear_cells(int row, int start_column, int end_column);
+  void move_cursor(int row, int column);
+  std::vector<TerminalCell> blank_row(int columns) const;
+  std::string encode_key(int key) const;
+  int color_attr_for_style(const TerminalStyle & style) const;
+  TerminalCell default_cell() const;
+
+  bool visible_{false};
+  int master_fd_{-1};
+  pid_t child_pid_{-1};
+  bool child_running_{false};
+  int last_rows_{0};
+  int last_columns_{0};
+  EscapeMode escape_mode_{EscapeMode::None};
+  bool osc_saw_escape_{false};
+  std::string escape_buffer_;
+  std::deque<std::vector<TerminalCell>> history_rows_;
+  std::vector<std::vector<TerminalCell>> screen_rows_;
+  TerminalStyle default_style_{};
+  TerminalStyle current_style_{};
+  int cursor_row_{0};
+  int cursor_column_{0};
+  int saved_cursor_row_{0};
+  int saved_cursor_column_{0};
+  bool pending_wrap_{false};
+  bool cursor_visible_{true};
+};
+
 Theme make_default_theme();
 const Theme & current_theme();
 int theme_attr(int role);
@@ -77,6 +165,8 @@ bool is_alt_binding(int key, int expected);
 void start_search(SearchState & state);
 SearchInputResult handle_search_input(SearchState & state, int key);
 int find_best_match(const std::vector<std::string> & labels, const std::string & query, int current_index);
+CommanderLayout make_commander_layout(int rows, bool terminal_visible);
+std::string with_terminal_help(const std::string & text, bool terminal_visible);
 
 std::string truncate_text(const std::string & text, int width);
 

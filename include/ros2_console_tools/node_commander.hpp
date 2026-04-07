@@ -121,6 +121,7 @@ private:
   std::vector<DetailLine> detail_lines_cache_;
   std::map<std::string, bool> collapsed_detail_sections_;
   bool help_popup_open_{false};
+  tui::TerminalPane terminal_pane_;
 };
 
 }  // namespace ros2_console_tools

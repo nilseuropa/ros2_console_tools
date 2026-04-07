@@ -224,6 +224,7 @@ private:
   bool edit_popup_open_{false};
   bool edit_popup_dirty_{false};
   std::string edit_popup_buffer_;
+  tui::TerminalPane terminal_pane_;
 };
 
 }  // namespace ros2_console_tools

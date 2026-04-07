@@ -66,6 +66,7 @@ int ActionCommanderScreen::run() {
 
   bool running = true;
   while (running && rclcpp::ok()) {
+    terminal_pane_.update();
     draw();
     const int key = getch();
     if (key == ERR) {
@@ -78,6 +79,17 @@ int ActionCommanderScreen::run() {
 }
 
 bool ActionCommanderScreen::handle_key(int key) {
+  if (is_alt_binding(key, 't')) {
+    search_state_.active = false;
+    terminal_pane_.toggle();
+    return true;
+  }
+  if (terminal_pane_.visible()) {
+    if (key == KEY_F(10)) {
+      return false;
+    }
+    return terminal_pane_.handle_key(key);
+  }
   if (search_state_.active) {
     return handle_search_key(key);
   }
@@ -190,9 +202,10 @@ void ActionCommanderScreen::draw() {
   int rows = 0;
   int columns = 0;
   getmaxyx(stdscr, rows, columns);
-  const int help_row = rows - 1;
-  const int status_row = rows - 2;
-  const int content_bottom = std::max(1, status_row - 1);
+  const auto layout = tui::make_commander_layout(rows, terminal_pane_.visible());
+  const int help_row = layout.help_row;
+  const int status_row = layout.status_row;
+  const int content_bottom = layout.content_bottom;
 
   draw_box(0, 0, content_bottom, columns - 1, kColorFrame);
   attron(theme_attr(kColorTitle));
@@ -207,7 +220,10 @@ void ActionCommanderScreen::draw() {
 
   draw_status_line(status_row, columns);
   draw_help_line(help_row, columns);
-  draw_search_box(rows, columns, search_state_);
+  draw_search_box(layout.pane_rows, columns, search_state_);
+  if (terminal_pane_.visible()) {
+    terminal_pane_.draw(layout.terminal_top, 0, rows - 1, columns - 1);
+  }
   refresh();
 }
 
@@ -299,7 +315,7 @@ void ActionCommanderScreen::draw_help_line(int row, int columns) const {
     backend_->detail_open_
     ? "Esc Back  F4 Refresh  F10 Exit"
     : "Enter Inspect  Alt+S Search  F4 Refresh  F10 Exit";
-  draw_help_bar(row, columns, help);
+  draw_help_bar(row, columns, tui::with_terminal_help(help, terminal_pane_.visible()));
 }
 
 }  // namespace ros2_console_tools

@@ -297,6 +297,7 @@ private:
   std::string plot_topic_name_;
   std::string plot_field_name_;
   std::string plot_field_path_;
+  tui::TerminalPane terminal_pane_;
 };
 
 }  // namespace ros2_console_tools
