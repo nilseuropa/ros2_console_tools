@@ -189,7 +189,7 @@ bool NodeCommanderScreen::handle_key(int key) {
     case KEY_F(3):
       return launch_topic_monitor();
     case KEY_F(4):
-      return launch_parameter_commander();
+      return launch_selected_node_parameters();
     case KEY_F(5):
       return launch_service_commander();
     case KEY_F(6):
@@ -491,14 +491,29 @@ bool NodeCommanderScreen::launch_log_viewer() {
 }
 
 bool NodeCommanderScreen::launch_service_commander() {
+  std::string selected_node;
+  {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    if (backend_->node_entries_.empty() ||
+      backend_->selected_index_ < 0 ||
+      backend_->selected_index_ >= static_cast<int>(backend_->node_entries_.size()))
+    {
+      backend_->status_line_ = "No node selected.";
+      return true;
+    }
+    selected_node = backend_->node_entries_[static_cast<std::size_t>(backend_->selected_index_)];
+  }
+
   def_prog_mode();
   endwin();
   std::string error;
-  const bool ok = run_service_commander_subprocess("", "", &error);
+  const bool ok = run_service_commander_subprocess(selected_node, "", &error);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
-    backend_->status_line_ = ok ? "Returned from service_commander." : "service_commander failed: " + error;
+    backend_->status_line_ = ok
+      ? "Returned from service_commander for " + selected_node + "."
+      : "service_commander failed: " + error;
   }
   return true;
 }
@@ -664,7 +679,7 @@ void NodeCommanderScreen::draw() {
   draw_search_box(rows, columns, search_state_);
   if (help_popup_open_) {
     const int popup_width = std::min(columns - 8, 76);
-    const int popup_height = 14;
+    const int popup_height = 16;
     const int popup_left = std::max(2, (columns - popup_width) / 2);
     const int popup_top = std::max(1, (rows - popup_height) / 2);
     const int popup_right = popup_left + popup_width - 1;
@@ -695,15 +710,17 @@ void NodeCommanderScreen::draw() {
     };
     draw_help_item(popup_top + 2, "Enter", "focus detail pane or open detail item");
     draw_help_item(popup_top + 3, "Tab", "switch node list and detail pane");
-    draw_help_item(popup_top + 4, "Alt+S", "search nodes");
-    draw_help_item(popup_top + 5, "F2", "log_viewer");
-    draw_help_item(popup_top + 6, "F3", "topic_monitor");
-    draw_help_item(popup_top + 7, "F4", "parameter_commander (global)");
-    draw_help_item(popup_top + 8, "F5", "service_commander (global)");
-    draw_help_item(popup_top + 9, "F6", "action_commander");
-    draw_help_item(popup_top + 10, "F7", "tf_monitor");
-    draw_help_item(popup_top + 11, "F8", "urdf_inspector");
-    draw_help_item(popup_top + 12, "Esc/F1", "close help");
+    draw_help_item(popup_top + 4, "Left/H", "collapse selected detail section");
+    draw_help_item(popup_top + 5, "Right/L", "expand selected detail section");
+    draw_help_item(popup_top + 6, "Alt+S", "search nodes");
+    draw_help_item(popup_top + 7, "F2", "log_viewer");
+    draw_help_item(popup_top + 8, "F3", "topic_monitor");
+    draw_help_item(popup_top + 9, "F4", "parameter_commander (selected node)");
+    draw_help_item(popup_top + 10, "F5", "service_commander (selected node)");
+    draw_help_item(popup_top + 11, "F6", "action_commander");
+    draw_help_item(popup_top + 12, "F7", "tf_monitor");
+    draw_help_item(popup_top + 13, "F8", "urdf_inspector");
+    draw_help_item(popup_top + 14, "Esc/F1", "close help");
   }
   refresh();
 }
@@ -820,7 +837,7 @@ void NodeCommanderScreen::draw_status_line(int row, int columns) const {
 void NodeCommanderScreen::draw_help_line(int row, int columns) const {
   draw_help_bar(
     row, columns,
-    "F1 Help  F2 Logs  F3 Topics  F4 Parameters  F5 Services  F6 Actions  F7 Transforms  F8 URDF  Enter Focus/Open  Left Collapse  Right Expand  Tab Pane  Alt+S Search  F10 Exit");
+    "F1 Help  F2 Logs  F3 Topics  F4 Node Params  F5 Node Services  F6 Actions  F7 Transforms  F8 URDF  Alt+S Search  F10 Exit");
 }
 
 }  // namespace ros2_console_tools
