@@ -89,42 +89,64 @@ std::vector<DetailLine> NodeCommanderBackend::selected_node_details() const {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (node_entries_.empty() || selected_index_ < 0 || selected_index_ >= static_cast<int>(node_entries_.size())) {
-      return {{"No node selected.", false, NodeDetailAction::None, ""}};
+      return {{"No node selected.", false, 0, NodeDetailAction::None, "", ""}};
     }
     selected_node = node_entries_[static_cast<std::size_t>(selected_index_)];
   }
 
-  const NodeDetails details = build_node_details(selected_node);
+  NodeDetails details;
+  try {
+    details = build_node_details(selected_node);
+  } catch (const std::exception & exception) {
+    return {
+      {"Node", true, 0, NodeDetailAction::None, "", "node"},
+      {selected_node, false, 1, NodeDetailAction::None, "", "node"},
+      {"Details", true, 0, NodeDetailAction::None, "", "details"},
+      {std::string("Failed to load node details: ") + exception.what(), false, 1, NodeDetailAction::None, "", "details"},
+    };
+  }
+
   std::vector<DetailLine> lines;
-  lines.push_back({"Node", true, NodeDetailAction::None, ""});
-  lines.push_back({details.node_name, false, NodeDetailAction::None, ""});
-  lines.push_back({"Parameter Services", true, NodeDetailAction::None, ""});
+  lines.push_back({"Node", true, 0, NodeDetailAction::None, "", "node"});
+  lines.push_back({details.node_name, false, 1, NodeDetailAction::None, "", "node"});
+  lines.push_back({"Parameter Services", true, 0, NodeDetailAction::OpenParameters, details.node_name, "parameters"});
   lines.push_back({
     details.parameter_services_ready ? "available" : "unavailable",
     false,
-    NodeDetailAction::OpenParameters,
-    details.node_name});
+    1,
+    NodeDetailAction::None,
+    "",
+    "parameters"});
 
-  auto append_section = [&lines](const std::string & title, const std::vector<GraphEndpoint> & entries) {
-    lines.push_back({title, true, NodeDetailAction::None, ""});
+  auto append_section =
+    [&lines, &details](
+    const std::string & title,
+    const std::string & section_key,
+    const std::vector<GraphEndpoint> & entries)
+    {
+      NodeDetailAction header_action = NodeDetailAction::None;
+      if (section_key == "services") {
+        header_action = NodeDetailAction::OpenServiceCommander;
+      }
+      lines.push_back({title, true, 0, header_action, details.node_name, section_key});
     if (entries.empty()) {
-      lines.push_back({"-", false, NodeDetailAction::None, ""});
+      lines.push_back({"-", false, 1, NodeDetailAction::None, "", section_key});
       return;
     }
     for (const auto & entry : entries) {
       NodeDetailAction action = NodeDetailAction::None;
-      if (title == "Publishers" || title == "Subscribers") {
+      if (section_key == "publishers" || section_key == "subscribers") {
         action = NodeDetailAction::OpenTopicMonitor;
-      } else if (title == "Services") {
+      } else if (section_key == "services") {
         action = NodeDetailAction::OpenServiceCommander;
       }
-      lines.push_back({entry.name + " [" + entry.type + "]", false, action, entry.name});
+      lines.push_back({entry.name + " [" + entry.type + "]", false, 1, action, entry.name, section_key});
     }
   };
 
-  append_section("Publishers", details.publishers);
-  append_section("Subscribers", details.subscribers);
-  append_section("Services", details.services);
+  append_section("Publishers", "publishers", details.publishers);
+  append_section("Subscribers", "subscribers", details.subscribers);
+  append_section("Services", "services", details.services);
   return lines;
 }
 

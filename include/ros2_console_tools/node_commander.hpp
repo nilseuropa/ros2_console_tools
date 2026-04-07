@@ -39,8 +39,10 @@ struct NodeDetails {
 struct DetailLine {
   std::string text;
   bool is_header{false};
+  int depth{0};
   NodeDetailAction action{NodeDetailAction::None};
   std::string target;
+  std::string section_key;
 };
 
 enum class NodeCommanderFocusPane {
@@ -82,6 +84,14 @@ private:
   bool handle_key(int key);
   bool handle_search_key(int key);
   int page_step() const;
+  std::string selected_node_name() const;
+  void refresh_detail_lines_cache(bool force = false);
+  void focus_detail_pane();
+  int preferred_detail_index() const;
+  bool is_detail_section_collapsed(const std::string & section_key) const;
+  bool expand_selected_detail_section();
+  bool collapse_selected_detail_section();
+  bool launch_parameter_commander();
   bool launch_log_viewer();
   bool launch_action_commander();
   bool launch_service_commander();
@@ -102,7 +112,12 @@ private:
   NodeCommanderFocusPane focus_pane_{NodeCommanderFocusPane::NodeList};
   int detail_selected_index_{0};
   int detail_scroll_{0};
+  std::string detail_cache_node_name_;
+  std::chrono::steady_clock::time_point detail_cache_refresh_time_{
+    std::chrono::steady_clock::time_point::min()};
+  std::vector<DetailLine> raw_detail_lines_cache_;
   std::vector<DetailLine> detail_lines_cache_;
+  std::map<std::string, bool> collapsed_detail_sections_;
   bool help_popup_open_{false};
 };
 

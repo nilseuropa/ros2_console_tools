@@ -197,6 +197,8 @@ private:
   void toggle_selected_topic_monitoring();
   void open_selected_topic_detail();
   void close_topic_detail();
+  rclcpp::QoS subscription_qos_for_topic(const std::string & topic_name) const;
+  rclcpp::QoS compatible_subscription_qos(const std::vector<rclcpp::QoS> & publisher_qos_profiles) const;
   void start_monitoring(const TopicEntry & entry);
   void stop_monitoring(const std::string & topic_name);
   void on_message(const std::string & topic_name, const rclcpp::SerializedMessage & message);

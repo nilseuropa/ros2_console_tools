@@ -4,14 +4,23 @@
 #include <chrono>
 #include <cctype>
 #include <future>
+#include <thread>
 #include <utility>
 
 namespace ros2_console_tools {
 
-ServiceCommanderBackend::ServiceCommanderBackend(const std::string & initial_service)
+ServiceCommanderBackend::ServiceCommanderBackend(
+  const std::string & target_node,
+  const std::string & initial_service)
 : Node("service_commander"),
+  target_node_(normalize_target_name(
+      this->declare_parameter<std::string>("target_node", target_node))),
   initial_service_name_(initial_service),
-  auto_open_initial_service_(false)
+  auto_open_initial_service_(!initial_service.empty()),
+  pending_initial_node_selection_(!target_node_.empty() || !initial_service.empty()),
+  view_mode_(target_node_.empty()
+      ? ServiceCommanderViewMode::NodeList
+      : ServiceCommanderViewMode::ServiceList)
 {
   const std::string theme_config_path =
     this->declare_parameter<std::string>("theme_config_path", tui::default_theme_config_path());
@@ -23,46 +32,163 @@ ServiceCommanderBackend::ServiceCommanderBackend(const std::string & initial_ser
   }
 }
 
-void ServiceCommanderBackend::refresh_services() {
-  const auto discovered = this->get_service_names_and_types();
-  std::vector<ServiceEntry> refreshed;
-  refreshed.reserve(discovered.size());
-  const std::string own_prefix = std::string(this->get_fully_qualified_name()) + "/";
-  for (const auto & [name, types] : discovered) {
-    if (name.empty()) {
-      continue;
-    }
-    if (name == this->get_fully_qualified_name() || name.rfind(own_prefix, 0) == 0) {
-      continue;
-    }
-    ServiceEntry entry;
-    entry.name = name;
-    entry.type = types.empty() ? "<unknown>" : types.front();
-    refreshed.push_back(std::move(entry));
-  }
-
-  std::sort(
-    refreshed.begin(), refreshed.end(),
-    [](const ServiceEntry & lhs, const ServiceEntry & rhs) { return lhs.name < rhs.name; });
-
-  services_ = std::move(refreshed);
-  clamp_service_selection();
-  select_initial_service_if_present();
-  status_line_ = "Loaded " + std::to_string(services_.size()) + " services. Enter inspects a service.";
+ServiceCommanderBackend::~ServiceCommanderBackend() {
+  finalize_request_storage();
 }
 
-void ServiceCommanderBackend::select_initial_service_if_present() {
-  if (initial_service_name_.empty()) {
+void ServiceCommanderBackend::refresh_node_list() {
+  const auto nodes = this->get_node_graph_interface()->get_node_names_and_namespaces();
+  node_entries_.clear();
+  node_entries_.reserve(nodes.size());
+
+  for (const auto & node : nodes) {
+    const std::string full_name = fully_qualified_node_name(node.second, node.first);
+    if (full_name == this->get_fully_qualified_name()) {
+      continue;
+    }
+    node_entries_.push_back(full_name);
+  }
+
+  std::sort(node_entries_.begin(), node_entries_.end());
+  node_entries_.erase(std::unique(node_entries_.begin(), node_entries_.end()), node_entries_.end());
+  clamp_node_selection();
+  last_node_refresh_time_ = std::chrono::steady_clock::now();
+
+  if (pending_initial_node_selection_) {
+    if (select_initial_node_if_present()) {
+      pending_initial_node_selection_ = false;
+    } else if (resolve_initial_node_from_service()) {
+      pending_initial_node_selection_ = false;
+    }
+  }
+
+  if (node_entries_.empty()) {
+    status_line_ = "No ROS 2 nodes discovered.";
     return;
+  }
+
+  if (view_mode_ == ServiceCommanderViewMode::NodeList) {
+    status_line_ = "Loaded " + std::to_string(node_entries_.size()) + " nodes. Press Enter to inspect services.";
+  }
+}
+
+void ServiceCommanderBackend::maybe_refresh_node_list() {
+  if (view_mode_ != ServiceCommanderViewMode::NodeList) {
+    return;
+  }
+
+  const auto now = std::chrono::steady_clock::now();
+  if (now - last_node_refresh_time_ >= std::chrono::seconds(1)) {
+    refresh_node_list();
+  }
+}
+
+void ServiceCommanderBackend::warm_up_node_list() {
+  auto target_visible = [this]() {
+      return target_node_.empty() || std::find(node_entries_.begin(), node_entries_.end(), target_node_) != node_entries_.end();
+    };
+
+  if (!node_entries_.empty() && (!pending_initial_node_selection_ || target_visible())) {
+    return;
+  }
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1200);
+  while (std::chrono::steady_clock::now() < deadline && rclcpp::ok()) {
+    if (!node_entries_.empty() && (!pending_initial_node_selection_ || target_visible())) {
+      return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    refresh_node_list();
+  }
+}
+
+void ServiceCommanderBackend::refresh_services() {
+  if (target_node_.empty()) {
+    view_mode_ = ServiceCommanderViewMode::NodeList;
+    refresh_node_list();
+    return;
+  }
+
+  try {
+    services_ = services_for_node(target_node_);
+  } catch (const std::exception & exception) {
+    services_.clear();
+    view_mode_ = ServiceCommanderViewMode::ServiceList;
+    status_line_ =
+      "Failed to load services from " + target_node_ + ": " + exception.what() + ". Press F4 to retry.";
+    return;
+  }
+  view_mode_ = ServiceCommanderViewMode::ServiceList;
+  clamp_service_selection();
+  if (select_initial_service_if_present() && auto_open_initial_service_) {
+    auto_open_initial_service_ = false;
+    open_selected_service();
+    return;
+  }
+
+  if (services_.empty()) {
+    status_line_ = "No services found on " + target_node_ + ".";
+    return;
+  }
+
+  auto_open_initial_service_ = false;
+  status_line_ =
+    "Loaded " + std::to_string(services_.size()) + " services from " + target_node_ + ".";
+}
+
+bool ServiceCommanderBackend::select_initial_node_if_present() {
+  if (target_node_.empty()) {
+    return false;
+  }
+
+  for (std::size_t index = 0; index < node_entries_.size(); ++index) {
+    if (node_entries_[index] == target_node_) {
+      selected_node_index_ = static_cast<int>(index);
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ServiceCommanderBackend::resolve_initial_node_from_service() {
+  if (!target_node_.empty() || initial_service_name_.empty()) {
+    return false;
+  }
+
+  for (std::size_t index = 0; index < node_entries_.size(); ++index) {
+    std::vector<ServiceEntry> services;
+    try {
+      services = services_for_node(node_entries_[index]);
+    } catch (const std::exception &) {
+      continue;
+    }
+    const auto found = std::find_if(
+      services.begin(), services.end(),
+      [this](const ServiceEntry & entry) { return entry.name == initial_service_name_; });
+    if (found != services.end()) {
+      target_node_ = node_entries_[index];
+      selected_node_index_ = static_cast<int>(index);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool ServiceCommanderBackend::select_initial_service_if_present() {
+  if (initial_service_name_.empty()) {
+    return false;
   }
 
   for (std::size_t index = 0; index < services_.size(); ++index) {
     if (services_[index].name == initial_service_name_) {
       selected_service_index_ = static_cast<int>(index);
       initial_service_name_.clear();
-      return;
+      return true;
     }
   }
+
+  return false;
 }
 
 void ServiceCommanderBackend::clamp_service_selection() {
@@ -72,6 +198,30 @@ void ServiceCommanderBackend::clamp_service_selection() {
     return;
   }
   selected_service_index_ = std::clamp(selected_service_index_, 0, static_cast<int>(services_.size()) - 1);
+}
+
+void ServiceCommanderBackend::clamp_node_selection() {
+  if (node_entries_.empty()) {
+    selected_node_index_ = 0;
+    node_scroll_ = 0;
+    return;
+  }
+  selected_node_index_ = std::clamp(selected_node_index_, 0, static_cast<int>(node_entries_.size()) - 1);
+}
+
+void ServiceCommanderBackend::select_current_node() {
+  clamp_node_selection();
+  if (node_entries_.empty()) {
+    status_line_ = "No node selected.";
+    return;
+  }
+
+  target_node_ = node_entries_[static_cast<std::size_t>(selected_node_index_)];
+  pending_initial_node_selection_ = false;
+  selected_service_index_ = 0;
+  service_scroll_ = 0;
+  close_service_detail();
+  refresh_services();
 }
 
 void ServiceCommanderBackend::open_selected_service() {
@@ -98,7 +248,23 @@ void ServiceCommanderBackend::close_service_detail() {
   response_error_.clear();
   selected_request_index_ = 0;
   request_scroll_ = 0;
-  status_line_ = "Returned to service list.";
+  status_line_ = "Returned to service list for " + target_node_ + ".";
+}
+
+void ServiceCommanderBackend::switch_to_node_list() {
+  pending_initial_node_selection_ = false;
+  finalize_request_storage();
+  selected_service_ = {};
+  request_rows_.clear();
+  response_rows_.clear();
+  response_error_.clear();
+  selected_request_index_ = 0;
+  request_scroll_ = 0;
+  services_.clear();
+  selected_service_index_ = 0;
+  service_scroll_ = 0;
+  view_mode_ = ServiceCommanderViewMode::NodeList;
+  refresh_node_list();
 }
 
 ServiceIntrospection & ServiceCommanderBackend::get_or_create_introspection(const std::string & type) {
@@ -121,6 +287,22 @@ ServiceIntrospection & ServiceCommanderBackend::get_or_create_introspection(cons
   return inserted.first->second;
 }
 
+std::size_t ServiceCommanderBackend::request_storage_units(std::size_t byte_count) const {
+  return (byte_count + sizeof(RequestStorageUnit) - 1) / sizeof(RequestStorageUnit);
+}
+
+void ServiceCommanderBackend::allocate_request_storage(std::size_t byte_count) {
+  request_storage_.assign(request_storage_units(byte_count), RequestStorageUnit{});
+}
+
+void * ServiceCommanderBackend::request_storage_data() {
+  return request_storage_.empty() ? nullptr : static_cast<void *>(request_storage_.data());
+}
+
+const void * ServiceCommanderBackend::request_storage_data() const {
+  return request_storage_.empty() ? nullptr : static_cast<const void *>(request_storage_.data());
+}
+
 void ServiceCommanderBackend::finalize_request_storage() {
   if (selected_service_.name.empty() || request_storage_.empty()) {
     request_storage_.clear();
@@ -129,7 +311,7 @@ void ServiceCommanderBackend::finalize_request_storage() {
 
   auto found = introspection_cache_.find(selected_service_.type);
   if (found != introspection_cache_.end() && found->second.request_members != nullptr) {
-    found->second.request_members->fini_function(request_storage_.data());
+    found->second.request_members->fini_function(request_storage_data());
   }
   request_storage_.clear();
 }
@@ -142,10 +324,10 @@ void ServiceCommanderBackend::reload_selected_service_request() {
   try {
     auto & introspection = get_or_create_introspection(selected_service_.type);
     finalize_request_storage();
-    request_storage_.assign(introspection.request_members->size_of_, 0);
+    allocate_request_storage(introspection.request_members->size_of_);
     introspection.request_members->init_function(
-      request_storage_.data(), rosidl_runtime_cpp::MessageInitialization::ALL);
-    request_rows_ = flatten_request_message(introspection.request_members, request_storage_.data());
+      request_storage_data(), rosidl_runtime_cpp::MessageInitialization::ALL);
+    request_rows_ = flatten_request_message(introspection.request_members, request_storage_data());
     selected_request_index_ = 0;
     request_scroll_ = 0;
     status_line_ = "Loaded default request for " + selected_service_.name + ".";
@@ -173,13 +355,13 @@ void ServiceCommanderBackend::call_selected_service() {
     }
 
     if (request_storage_.empty()) {
-      request_storage_.assign(introspection.request_members->size_of_, 0);
+      allocate_request_storage(introspection.request_members->size_of_);
       introspection.request_members->init_function(
-        request_storage_.data(), rosidl_runtime_cpp::MessageInitialization::ALL);
-      request_rows_ = flatten_request_message(introspection.request_members, request_storage_.data());
+        request_storage_data(), rosidl_runtime_cpp::MessageInitialization::ALL);
+      request_rows_ = flatten_request_message(introspection.request_members, request_storage_data());
     }
 
-    auto future = client->async_send_request(request_storage_.data());
+    auto future = client->async_send_request(request_storage_data());
     if (future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
       client->remove_pending_request(future.request_id);
       status_line_ = "Timed out calling " + selected_service_.name + ".";
@@ -195,6 +377,67 @@ void ServiceCommanderBackend::call_selected_service() {
     response_error_ = exception.what();
     status_line_ = "Call failed: " + response_error_;
   }
+}
+
+std::vector<ServiceEntry> ServiceCommanderBackend::services_for_node(const std::string & full_name) const {
+  std::string ns;
+  std::string name;
+  split_node_name(full_name, ns, name);
+
+  std::vector<ServiceEntry> services;
+  const auto discovered = const_cast<ServiceCommanderBackend *>(this)
+    ->get_node_graph_interface()
+    ->get_service_names_and_types_by_node(name, ns);
+  services.reserve(discovered.size());
+  for (const auto & [service_name, types] : discovered) {
+    if (service_name.empty()) {
+      continue;
+    }
+    ServiceEntry entry;
+    entry.name = service_name;
+    entry.type = types.empty() ? "<unknown>" : types.front();
+    services.push_back(std::move(entry));
+  }
+
+  std::sort(
+    services.begin(), services.end(),
+    [](const ServiceEntry & lhs, const ServiceEntry & rhs) { return lhs.name < rhs.name; });
+  return services;
+}
+
+std::string ServiceCommanderBackend::normalize_target_name(const std::string & name) const {
+  if (name.empty() || name.front() == '/') {
+    return name;
+  }
+  return "/" + name;
+}
+
+std::string ServiceCommanderBackend::fully_qualified_node_name(
+  const std::string & ns,
+  const std::string & name) const
+{
+  if (ns.empty() || ns == "/") {
+    return "/" + name;
+  }
+  if (ns.back() == '/') {
+    return ns + name;
+  }
+  return ns + "/" + name;
+}
+
+void ServiceCommanderBackend::split_node_name(
+  const std::string & full_name,
+  std::string & ns,
+  std::string & name) const
+{
+  const std::size_t slash = full_name.rfind('/');
+  if (slash == std::string::npos || slash == 0) {
+    ns = "/";
+    name = slash == std::string::npos ? full_name : full_name.substr(1);
+    return;
+  }
+  ns = full_name.substr(0, slash);
+  name = full_name.substr(slash + 1);
 }
 
 RequestRow * ServiceCommanderBackend::selected_request_row() {
@@ -288,7 +531,7 @@ bool ServiceCommanderBackend::set_selected_request_value(const std::string & val
 
   try {
     auto & introspection = get_or_create_introspection(selected_service_.type);
-    request_rows_ = flatten_request_message(introspection.request_members, request_storage_.data());
+    request_rows_ = flatten_request_message(introspection.request_members, request_storage_data());
     status_line_ = "Updated request field.";
     return true;
   } catch (const std::exception & exception) {
@@ -361,7 +604,7 @@ void ServiceCommanderBackend::append_member(
   if (member.is_array_) {
     const std::size_t element_count =
       member.size_function != nullptr ? member.size_function(field_memory) : member.array_size_;
-    rows.push_back({depth, label, "[" + std::to_string(element_count) + "]"});
+    rows.emplace_back(depth, label, "[" + std::to_string(element_count) + "]");
 
     for (std::size_t index = 0; index < element_count; ++index) {
       const std::string child_label = "[" + std::to_string(index) + "]";
@@ -370,25 +613,25 @@ void ServiceCommanderBackend::append_member(
         const void * element_memory =
           member.get_const_function != nullptr ? member.get_const_function(field_memory, index) : nullptr;
         if (element_memory != nullptr) {
-          rows.push_back({depth + 1, child_label, "<message>"});
+          rows.emplace_back(depth + 1, child_label, "<message>");
           append_message_members(rows, depth + 2, sub_members, element_memory);
         }
         continue;
       }
 
-      rows.push_back({depth + 1, child_label, array_element_to_string(member, field_memory, index)});
+      rows.emplace_back(depth + 1, child_label, array_element_to_string(member, field_memory, index));
     }
     return;
   }
 
   if (member.type_id_ == rosidl_typesupport_introspection_cpp::ROS_TYPE_MESSAGE) {
-    rows.push_back({depth, label, "<message>"});
+    rows.emplace_back(depth, label, "<message>");
     const auto * sub_members = static_cast<const MessageMembers *>(member.members_->data);
     append_message_members(rows, depth + 1, sub_members, field_memory);
     return;
   }
 
-  rows.push_back({depth, label, scalar_field_to_string(member.type_id_, field_memory)});
+  rows.emplace_back(depth, label, scalar_field_to_string(member.type_id_, field_memory));
 }
 
 void ServiceCommanderBackend::append_request_member(
@@ -401,7 +644,7 @@ void ServiceCommanderBackend::append_request_member(
   if (member.is_array_) {
     const std::size_t element_count =
       member.size_function != nullptr ? member.size_function(field_memory) : member.array_size_;
-    rows.push_back({depth, label, "[" + std::to_string(element_count) + "]", false, member.type_id_, nullptr});
+    rows.emplace_back(depth, label, "[" + std::to_string(element_count) + "]", false, member.type_id_, nullptr);
 
     for (std::size_t index = 0; index < element_count; ++index) {
       const std::string child_label = "[" + std::to_string(index) + "]";
@@ -410,26 +653,30 @@ void ServiceCommanderBackend::append_request_member(
         void * element_memory =
           member.get_function != nullptr ? member.get_function(field_memory, index) : nullptr;
         if (element_memory != nullptr) {
-          rows.push_back({depth + 1, child_label, "<message>", false, member.type_id_, nullptr});
+          rows.emplace_back(depth + 1, child_label, "<message>", false, member.type_id_, nullptr);
           append_request_members(rows, depth + 2, sub_members, element_memory);
         }
         continue;
       }
 
-      rows.push_back({depth + 1, child_label, array_element_to_string(member, field_memory, index), false, member.type_id_, nullptr});
+      rows.emplace_back(
+        depth + 1, child_label, array_element_to_string(member, field_memory, index), false, member.type_id_,
+        nullptr);
     }
     return;
   }
 
   if (member.type_id_ == rosidl_typesupport_introspection_cpp::ROS_TYPE_MESSAGE) {
-    rows.push_back({depth, label, "<message>", false, member.type_id_, nullptr});
+    rows.emplace_back(depth, label, "<message>", false, member.type_id_, nullptr);
     const auto * sub_members = static_cast<const MessageMembers *>(member.members_->data);
     append_request_members(rows, depth + 1, sub_members, field_memory);
     return;
   }
 
   const bool editable = member.type_id_ != rosidl_typesupport_introspection_cpp::ROS_TYPE_WSTRING;
-  rows.push_back({depth, label, scalar_field_to_string(member.type_id_, field_memory), editable, member.type_id_, editable ? field_memory : nullptr});
+  rows.emplace_back(
+    depth, label, scalar_field_to_string(member.type_id_, field_memory), editable, member.type_id_,
+    editable ? field_memory : nullptr);
 }
 
 std::string ServiceCommanderBackend::array_element_to_string(

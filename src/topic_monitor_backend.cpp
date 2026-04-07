@@ -316,12 +316,68 @@ void TopicMonitorBackend::close_topic_detail() {
   status_line_ = "Returned to topic list.";
 }
 
+rclcpp::QoS TopicMonitorBackend::subscription_qos_for_topic(const std::string & topic_name) const {
+  try {
+    const auto publishers = this->get_publishers_info_by_topic(topic_name);
+    std::vector<rclcpp::QoS> publisher_qos_profiles;
+    publisher_qos_profiles.reserve(publishers.size());
+    for (const auto & publisher : publishers) {
+      publisher_qos_profiles.push_back(publisher.qos_profile());
+    }
+    return compatible_subscription_qos(publisher_qos_profiles);
+  } catch (const std::exception &) {
+    return compatible_subscription_qos({});
+  }
+}
+
+rclcpp::QoS TopicMonitorBackend::compatible_subscription_qos(
+  const std::vector<rclcpp::QoS> & publisher_qos_profiles) const
+{
+  std::size_t depth = 10;
+  bool require_best_effort = false;
+  bool require_volatile = false;
+  bool saw_transient_local = false;
+
+  for (const auto & publisher_qos : publisher_qos_profiles) {
+    if (publisher_qos.history() == rclcpp::HistoryPolicy::KeepLast) {
+      depth = std::max(depth, publisher_qos.depth());
+    }
+
+    if (publisher_qos.reliability() != rclcpp::ReliabilityPolicy::Reliable) {
+      require_best_effort = true;
+    }
+
+    if (publisher_qos.durability() == rclcpp::DurabilityPolicy::TransientLocal) {
+      saw_transient_local = true;
+    } else {
+      require_volatile = true;
+    }
+  }
+
+  rclcpp::QoS qos{rclcpp::KeepLast(depth)};
+  if (require_best_effort) {
+    qos.best_effort();
+  } else {
+    qos.reliable();
+  }
+
+  if (saw_transient_local && !require_volatile) {
+    qos.transient_local();
+  } else {
+    qos.durability_volatile();
+  }
+
+  qos.liveliness(rclcpp::LivelinessPolicy::Automatic);
+  return qos;
+}
+
 void TopicMonitorBackend::start_monitoring(const TopicEntry & entry) {
   try {
+    const auto subscription_qos = subscription_qos_for_topic(entry.name);
     auto subscription = this->create_generic_subscription(
       entry.name,
       entry.type,
-      rclcpp::QoS(rclcpp::KeepLast(10)),
+      subscription_qos,
       [this, topic_name = entry.name](std::shared_ptr<rclcpp::SerializedMessage> message) {
         on_message(topic_name, *message);
       });
