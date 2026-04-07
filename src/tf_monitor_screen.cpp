@@ -310,6 +310,15 @@ void TfMonitorScreen::draw_inspect_popup(int rows, int columns) const {
   mvprintw(top, left + 2, " TF Inspect ");
   attroff(theme_attr(kColorHeader));
 
+  if (!backend_->inspect_result_available_) {
+    mvaddnstr(
+      top + 2, left + 2,
+      "Selected frames are not connected.",
+      popup_width - 4);
+    draw_help_bar_region(bottom - 1, left + 2, popup_width - 4, "Enter Close  Esc Close  F10 Exit");
+    return;
+  }
+
   const Vec3 rpy = rpy_from_quat(backend_->inspect_result_.transform.rotation);
   const auto print_line = [&](int row, const std::string & text) {
     mvaddnstr(row, left + 2, truncate_text(text, popup_width - 4).c_str(), popup_width - 4);

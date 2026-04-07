@@ -84,19 +84,26 @@ std::optional<InspectResult> TfMonitorBackend::compute_selected_transform() cons
   return InspectResult{from, to, relative};
 }
 
+bool TfMonitorBackend::refresh_inspect_result() {
+  const auto result = compute_selected_transform();
+  inspect_result_available_ = result.has_value();
+  if (inspect_result_available_) {
+    inspect_result_ = *result;
+  }
+  return inspect_result_available_;
+}
+
 void TfMonitorBackend::open_inspect_popup() {
   if (selected_frames_.size() < 2) {
     set_status("Select at least two links with Space.");
     return;
   }
 
-  const auto result = compute_selected_transform();
-  if (!result.has_value()) {
+  if (!refresh_inspect_result()) {
     set_status("Selected frames are not connected.");
     return;
   }
 
-  inspect_result_ = *result;
   inspect_popup_open_ = true;
   set_status("Inspecting " + inspect_result_.from_frame + " -> " + inspect_result_.to_frame + ".");
 }
@@ -207,10 +214,22 @@ void TfMonitorBackend::refresh_rows() {
       [this](const std::string & frame) { return frame_poses_.find(frame) == frame_poses_.end(); }),
     selected_frames_.end());
 
+  if (inspect_popup_open_) {
+    inspect_result_available_ = refresh_inspect_result();
+  } else {
+    inspect_result_available_ = false;
+  }
+
   clamp_selection();
-  status_line_ =
-    "Loaded " + std::to_string(links_by_child_.size()) + " TF links across "
-    + std::to_string(all_frames.size()) + " frames.";
+  if (inspect_popup_open_) {
+    status_line_ = inspect_result_available_
+      ? ("Inspecting " + inspect_result_.from_frame + " -> " + inspect_result_.to_frame + ".")
+      : "Selected frames are not connected.";
+  } else {
+    status_line_ =
+      "Loaded " + std::to_string(links_by_child_.size()) + " TF links across "
+      + std::to_string(all_frames.size()) + " frames.";
+  }
 }
 
 void TfMonitorBackend::clamp_selection() {

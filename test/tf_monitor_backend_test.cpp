@@ -68,5 +68,36 @@ TEST_F(TfMonitorBackendTest, DisplaysRootFrameBeforeChildLinks) {
   EXPECT_EQ(odom_pose->second.root_frame, "odom");
 }
 
+TEST_F(TfMonitorBackendTest, RefreshesInspectResultForDynamicTransforms) {
+  TfMonitorBackend backend;
+
+  TFMessage initial_message;
+  TransformStamped odom_to_base_link;
+  odom_to_base_link.header.frame_id = "odom";
+  odom_to_base_link.child_frame_id = "base_link";
+  odom_to_base_link.transform.translation.x = 1.0;
+  odom_to_base_link.transform.rotation.w = 1.0;
+  initial_message.transforms.push_back(odom_to_base_link);
+
+  backend.handle_tf_message(initial_message, false);
+  backend.refresh_rows();
+  backend.selected_frames_ = {"odom", "base_link"};
+  backend.open_inspect_popup();
+
+  ASSERT_TRUE(backend.inspect_popup_open_);
+  ASSERT_TRUE(backend.inspect_result_available_);
+  EXPECT_DOUBLE_EQ(backend.inspect_result_.transform.translation.x, 1.0);
+
+  TFMessage updated_message;
+  odom_to_base_link.transform.translation.x = 2.5;
+  updated_message.transforms.push_back(odom_to_base_link);
+
+  backend.handle_tf_message(updated_message, false);
+  backend.refresh_rows();
+
+  EXPECT_TRUE(backend.inspect_result_available_);
+  EXPECT_DOUBLE_EQ(backend.inspect_result_.transform.translation.x, 2.5);
+}
+
 }  // namespace
 }  // namespace ros2_console_tools

@@ -192,6 +192,7 @@ private:
   void clamp_selection();
   void set_status(const std::string & text);
   std::optional<InspectResult> compute_selected_transform() const;
+  bool refresh_inspect_result();
   void toggle_selected_row();
   void open_inspect_popup();
 
@@ -205,6 +206,7 @@ private:
   int selected_index_{0};
   int scroll_{0};
   bool inspect_popup_open_{false};
+  bool inspect_result_available_{false};
   InspectResult inspect_result_;
   std::string status_line_{"Waiting for TF messages..."};
 };
