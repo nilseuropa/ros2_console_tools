@@ -11,6 +11,7 @@
 
   <depend>ament_index_cpp</depend>
   <depend>curses</depend>
+  <depend>diagnostic_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>rcl_interfaces</depend>
