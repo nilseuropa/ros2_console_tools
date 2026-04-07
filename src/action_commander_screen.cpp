@@ -79,7 +79,7 @@ int ActionCommanderScreen::run() {
 }
 
 bool ActionCommanderScreen::handle_key(int key) {
-  if (key == KEY_F(9)) {
+  if (is_alt_binding(key, 't')) {
     search_state_.active = false;
     terminal_pane_.toggle();
     return true;

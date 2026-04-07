@@ -174,7 +174,7 @@ bool NodeCommanderScreen::handle_key(int key) {
         return true;
     }
   }
-  if (key == KEY_F(9)) {
+  if (is_alt_binding(key, 't')) {
     search_state_.active = false;
     terminal_pane_.toggle();
     return true;
@@ -768,7 +768,7 @@ void NodeCommanderScreen::draw() {
     draw_help_item(popup_top + 11, "F6", "action_commander");
     draw_help_item(popup_top + 12, "F7", "tf_monitor");
     draw_help_item(popup_top + 13, "F8", "urdf_inspector");
-    draw_help_item(popup_top + 14, "F9", "toggle terminal");
+    draw_help_item(popup_top + 14, "Alt+T", "toggle terminal");
     draw_help_item(popup_top + 15, "Esc/F1", "close help");
   }
   if (terminal_pane_.visible()) {

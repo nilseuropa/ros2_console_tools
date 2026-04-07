@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#define private public
 #include "ros2_console_tools/tui.hpp"
+#undef private
 
 namespace ros2_console_tools::tui {
 namespace {
@@ -28,10 +30,53 @@ TEST(TuiTest, CommanderLayoutUsesFullHeightWhenTerminalHidden) {
 }
 
 TEST(TuiTest, TerminalHelpReflectsVisibilityState) {
-  EXPECT_EQ(with_terminal_help("", false), "F9 Terminal");
-  EXPECT_EQ(with_terminal_help("", true), "F9 Hide");
-  EXPECT_EQ(with_terminal_help("F10 Exit", false), "F10 Exit  F9 Terminal");
-  EXPECT_EQ(with_terminal_help("F10 Exit", true), "F10 Exit  F9 Hide");
+  EXPECT_EQ(with_terminal_help("", false), "Alt+T Terminal");
+  EXPECT_EQ(with_terminal_help("", true), "Alt+T Hide");
+  EXPECT_EQ(with_terminal_help("F10 Exit", false), "F10 Exit  Alt+T Terminal");
+  EXPECT_EQ(with_terminal_help("F10 Exit", true), "F10 Exit  Alt+T Hide");
+}
+
+TEST(TuiTest, TerminalPaneScrollsScreenBuffer) {
+  TerminalPane pane;
+  pane.resize_screen_buffer(3, 6);
+
+  const std::string text = "aaa\r\nbbb\r\nccc\r\nddd";
+  for (char ch : text) {
+    pane.process_output_char(ch);
+  }
+
+  EXPECT_EQ(pane.screen_rows_[0][0].glyph, 'b');
+  EXPECT_EQ(pane.screen_rows_[1][0].glyph, 'c');
+  EXPECT_EQ(pane.screen_rows_[2][0].glyph, 'd');
+}
+
+TEST(TuiTest, TerminalPaneHandlesCarriageReturnAndCursorMotion) {
+  TerminalPane pane;
+  pane.resize_screen_buffer(2, 5);
+
+  const std::string text = "abc\rZ\x1b[2DXY";
+  for (char ch : text) {
+    pane.process_output_char(ch);
+  }
+
+  EXPECT_EQ(pane.screen_rows_[0][0].glyph, 'X');
+  EXPECT_EQ(pane.screen_rows_[0][1].glyph, 'Y');
+  EXPECT_EQ(pane.screen_rows_[0][2].glyph, 'c');
+}
+
+TEST(TuiTest, TerminalPaneAppliesAnsiSgrColors) {
+  TerminalPane pane;
+  pane.resize_screen_buffer(1, 4);
+
+  const std::string text = "\x1b[31mR\x1b[0mN";
+  for (char ch : text) {
+    pane.process_output_char(ch);
+  }
+
+  EXPECT_EQ(pane.screen_rows_[0][0].glyph, 'R');
+  EXPECT_EQ(pane.screen_rows_[0][0].style.foreground, COLOR_RED);
+  EXPECT_EQ(pane.screen_rows_[0][1].glyph, 'N');
+  EXPECT_EQ(pane.screen_rows_[0][1].style.foreground, COLOR_WHITE);
 }
 
 }  // namespace

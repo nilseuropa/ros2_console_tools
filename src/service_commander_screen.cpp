@@ -101,7 +101,7 @@ bool ServiceCommanderScreen::handle_key(int key) {
   if (edit_popup_open_) {
     return handle_edit_popup_key(key);
   }
-  if (key == KEY_F(9)) {
+  if (is_alt_binding(key, 't')) {
     search_state_.active = false;
     terminal_pane_.toggle();
     return true;
