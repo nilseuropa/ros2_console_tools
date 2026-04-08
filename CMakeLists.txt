@@ -21,6 +21,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rcl_interfaces REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(rosidl_typesupport_introspection_cpp REQUIRED)
 find_package(tf2_msgs REQUIRED)
 find_package(urdf REQUIRED)
@@ -46,6 +47,31 @@ target_include_directories(map_viewer PRIVATE ${CURSES_INCLUDE_DIR} include)
 target_link_libraries(map_viewer map_viewer_lib)
 
 install(TARGETS map_viewer_lib map_viewer
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_library(image_viewer_lib
+  src/image_viewer_backend.cpp
+  src/image_viewer_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(image_viewer_lib
+  ament_index_cpp
+  rclcpp
+  sensor_msgs
+)
+target_include_directories(image_viewer_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(image_viewer_lib ${NCURSESW_LIBRARY})
+
+add_executable(image_viewer src/image_viewer.cpp)
+ament_target_dependencies(image_viewer
+  rclcpp
+  sensor_msgs
+)
+target_include_directories(image_viewer PRIVATE ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(image_viewer image_viewer_lib)
+
+install(TARGETS image_viewer_lib image_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -80,14 +106,16 @@ add_library(topic_monitor_lib
 ament_target_dependencies(topic_monitor_lib
   ament_index_cpp
   rclcpp
+  sensor_msgs
   rosidl_typesupport_introspection_cpp
 )
 target_include_directories(topic_monitor_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
-target_link_libraries(topic_monitor_lib ${NCURSESW_LIBRARY} map_viewer_lib)
+target_link_libraries(topic_monitor_lib ${NCURSESW_LIBRARY} map_viewer_lib image_viewer_lib)
 
 add_executable(topic_monitor src/topic_monitor.cpp)
 ament_target_dependencies(topic_monitor
   rclcpp
+  sensor_msgs
   rosidl_typesupport_introspection_cpp
 )
 target_include_directories(topic_monitor PRIVATE ${CURSES_INCLUDE_DIR} include)
@@ -409,6 +437,21 @@ if(BUILD_TESTING)
     target_include_directories(topic_monitor_backend_test PRIVATE ${CURSES_INCLUDE_DIR} include)
     target_link_libraries(topic_monitor_backend_test
       topic_monitor_lib
+    )
+  endif()
+
+  ament_add_gtest(image_viewer_backend_test
+    test/image_viewer_backend_test.cpp
+  )
+  if(TARGET image_viewer_backend_test)
+    ament_target_dependencies(image_viewer_backend_test
+      ament_index_cpp
+      rclcpp
+      sensor_msgs
+    )
+    target_include_directories(image_viewer_backend_test PRIVATE ${CURSES_INCLUDE_DIR} include)
+    target_link_libraries(image_viewer_backend_test
+      image_viewer_lib
     )
   endif()
 

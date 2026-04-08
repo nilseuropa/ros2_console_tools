@@ -16,6 +16,7 @@
   <depend>nav_msgs</depend>
   <depend>rcl_interfaces</depend>
   <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
   <depend>rosidl_typesupport_introspection_cpp</depend>
   <depend>tf2_msgs</depend>
   <depend>urdf</depend>
