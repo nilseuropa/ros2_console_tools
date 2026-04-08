@@ -281,6 +281,67 @@ install(TARGETS urdf_inspector_lib urdf_inspector
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_library(host_console_tools_common
+  src/process_runner.cpp
+  src/systemd_client.cpp
+  src/journal_client.cpp
+)
+target_include_directories(host_console_tools_common PUBLIC include)
+
+add_library(systemd_commander_lib
+  src/systemd_commander_backend.cpp
+  src/systemd_commander_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(systemd_commander_lib
+  ament_index_cpp
+)
+target_include_directories(systemd_commander_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(systemd_commander_lib
+  ${NCURSESW_LIBRARY}
+  host_console_tools_common
+)
+
+add_library(journal_viewer_lib
+  src/journal_viewer_backend.cpp
+  src/journal_viewer_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(journal_viewer_lib
+  ament_index_cpp
+)
+target_include_directories(journal_viewer_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(journal_viewer_lib
+  ${NCURSESW_LIBRARY}
+  host_console_tools_common
+)
+
+add_executable(systemd_commander src/systemd_commander.cpp)
+ament_target_dependencies(systemd_commander
+  ament_index_cpp
+)
+target_include_directories(systemd_commander PRIVATE ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(systemd_commander
+  systemd_commander_lib
+  journal_viewer_lib
+)
+
+add_executable(journal_viewer src/journal_viewer.cpp)
+ament_target_dependencies(journal_viewer
+  ament_index_cpp
+)
+target_include_directories(journal_viewer PRIVATE ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(journal_viewer journal_viewer_lib)
+
+install(TARGETS
+  host_console_tools_common
+  systemd_commander_lib
+  systemd_commander
+  journal_viewer_lib
+  journal_viewer
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 target_link_libraries(
   node_commander_lib
   parameter_commander_lib
@@ -377,6 +438,26 @@ if(BUILD_TESTING)
     target_include_directories(tui_test PRIVATE ${CURSES_INCLUDE_DIR} include)
     target_link_libraries(tui_test
       ${NCURSESW_LIBRARY}
+    )
+  endif()
+
+  ament_add_gtest(systemd_client_parse_test
+    test/systemd_client_parse_test.cpp
+  )
+  if(TARGET systemd_client_parse_test)
+    target_include_directories(systemd_client_parse_test PRIVATE include)
+    target_link_libraries(systemd_client_parse_test
+      host_console_tools_common
+    )
+  endif()
+
+  ament_add_gtest(journal_client_parse_test
+    test/journal_client_parse_test.cpp
+  )
+  if(TARGET journal_client_parse_test)
+    target_include_directories(journal_client_parse_test PRIVATE include)
+    target_link_libraries(journal_client_parse_test
+      host_console_tools_common
     )
   endif()
 endif()
