@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "ros2_console_tools/process_runner.hpp"
 #include "ros2_console_tools/systemd_client.hpp"
 #include "ros2_console_tools/tui.hpp"
 
@@ -58,6 +59,13 @@ private:
   bool handle_unit_list_key(int key);
   bool handle_detail_popup_key(int key);
   bool handle_editor_key(int key);
+  void restore_after_shell_prompt();
+  bool ensure_sudo_credentials(const std::string & reason);
+  ProcessResult run_sudo_command(
+    const std::vector<std::string> & arguments,
+    const std::string & reason);
+  bool perform_selected_unit_action(const std::string & action);
+  bool reload_systemd_manager(bool prefer_sudo = false);
   bool launch_selected_logs();
   bool open_selected_service_editor();
   bool save_editor();

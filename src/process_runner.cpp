@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -83,6 +84,53 @@ ProcessResult run_process(const std::vector<std::string> & arguments) {
     result.exit_code = WEXITSTATUS(status);
   } else if (WIFSIGNALED(status)) {
     result.output.append("\nProcess terminated by signal ");
+    result.output.append(std::to_string(WTERMSIG(status)));
+  }
+
+  return result;
+}
+
+ProcessResult run_process_interactive(const std::vector<std::string> & arguments) {
+  ProcessResult result;
+  if (arguments.empty()) {
+    result.output = "No command specified.";
+    return result;
+  }
+
+  const pid_t child_pid = fork();
+  if (child_pid == -1) {
+    result.output = std::string("fork() failed: ") + std::strerror(errno);
+    return result;
+  }
+
+  if (child_pid == 0) {
+    std::vector<char *> argv;
+    argv.reserve(arguments.size() + 1);
+    for (const auto & argument : arguments) {
+      argv.push_back(const_cast<char *>(argument.c_str()));
+    }
+    argv.push_back(nullptr);
+
+    execvp(argv.front(), argv.data());
+    std::perror(argv.front());
+    _exit(127);
+  }
+
+  result.started = true;
+  int status = 0;
+  while (waitpid(child_pid, &status, 0) == -1) {
+    if (errno != EINTR) {
+      result.output.append("waitpid() failed: ");
+      result.output.append(std::strerror(errno));
+      return result;
+    }
+  }
+
+  if (WIFEXITED(status)) {
+    result.exited_normally = true;
+    result.exit_code = WEXITSTATUS(status);
+  } else if (WIFSIGNALED(status)) {
+    result.output.append("Process terminated by signal ");
     result.output.append(std::to_string(WTERMSIG(status)));
   }
 

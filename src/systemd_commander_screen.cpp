@@ -4,9 +4,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <fstream>
 #include <memory>
 #include <sstream>
+#include <string>
+#include <unistd.h>
 #include <vector>
 
 #include "ros2_console_tools/journal_viewer.hpp"
@@ -124,6 +127,24 @@ std::vector<StyledSpan> highlight_unit_line(const std::string & line) {
   return spans;
 }
 
+std::string trim(std::string text) {
+  const auto first_non_space = std::find_if(
+    text.begin(), text.end(),
+    [](unsigned char ch) { return std::isspace(ch) == 0; });
+  text.erase(text.begin(), first_non_space);
+
+  const auto trailing_base = text;
+  const auto last_non_space = std::find_if(
+    text.rbegin(), text.rend(),
+    [](unsigned char ch) { return std::isspace(ch) == 0; });
+  if (last_non_space == text.rend()) {
+    return "";
+  }
+  text.erase(last_non_space.base(), text.end());
+  (void)trailing_base;
+  return text;
+}
+
 }  // namespace
 
 SystemdCommanderScreen::SystemdCommanderScreen(
@@ -201,20 +222,20 @@ bool SystemdCommanderScreen::handle_key(int key) {
         return false;
       case KEY_F(2):
         detail_scroll_ = 0;
-        return backend_->perform_action("start");
+        return perform_selected_unit_action("start");
       case KEY_F(3):
         detail_scroll_ = 0;
-        return backend_->perform_action("stop");
+        return perform_selected_unit_action("stop");
       case KEY_F(4):
         detail_scroll_ = 0;
         backend_->refresh_units();
         return true;
       case KEY_F(5):
         detail_scroll_ = 0;
-        return backend_->perform_action("restart");
+        return perform_selected_unit_action("restart");
       case KEY_F(6):
         detail_scroll_ = 0;
-        return backend_->perform_action("reload");
+        return perform_selected_unit_action("reload");
       case KEY_F(7):
         return open_selected_service_editor();
       case KEY_F(9):
@@ -229,20 +250,20 @@ bool SystemdCommanderScreen::handle_key(int key) {
       return false;
     case KEY_F(2):
       detail_scroll_ = 0;
-      return backend_->perform_action("start");
+      return perform_selected_unit_action("start");
     case KEY_F(3):
       detail_scroll_ = 0;
-      return backend_->perform_action("stop");
+      return perform_selected_unit_action("stop");
     case KEY_F(4):
       detail_scroll_ = 0;
       backend_->refresh_units();
       return true;
     case KEY_F(5):
       detail_scroll_ = 0;
-      return backend_->perform_action("restart");
+      return perform_selected_unit_action("restart");
     case KEY_F(6):
       detail_scroll_ = 0;
-      return backend_->perform_action("reload");
+      return perform_selected_unit_action("reload");
     case KEY_F(9):
       return launch_selected_logs();
     case '\n':
@@ -547,6 +568,129 @@ bool SystemdCommanderScreen::handle_editor_key(int key) {
   }
 }
 
+void SystemdCommanderScreen::restore_after_shell_prompt() {
+  reset_prog_mode();
+  refresh();
+  clear();
+  clearok(stdscr, TRUE);
+  redrawwin(stdscr);
+  keypad(stdscr, TRUE);
+  noecho();
+  cbreak();
+  timeout(100);
+  flushinp();
+  curs_set(0);
+  draw();
+}
+
+bool SystemdCommanderScreen::ensure_sudo_credentials(const std::string & reason) {
+  if (run_process({"sudo", "-n", "true"}).succeeded()) {
+    return true;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = reason.empty() ? "Sudo authentication required." : reason;
+  }
+
+  def_prog_mode();
+  endwin();
+  std::fflush(stdout);
+  if (!reason.empty()) {
+    std::fprintf(stderr, "\n%s\n", reason.c_str());
+  }
+  const ProcessResult validation = run_process_interactive({"sudo", "-v"});
+  std::fprintf(stderr, "\n");
+
+  restore_after_shell_prompt();
+
+  if (!validation.succeeded()) {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Sudo authentication failed or was cancelled.";
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lock(backend_->mutex_);
+  backend_->status_line_ = "Sudo authentication succeeded.";
+  return true;
+}
+
+ProcessResult SystemdCommanderScreen::run_sudo_command(
+  const std::vector<std::string> & arguments,
+  const std::string & reason)
+{
+  if (!ensure_sudo_credentials(reason)) {
+    ProcessResult result;
+    result.output = "Sudo authentication failed or was cancelled.";
+    return result;
+  }
+
+  std::vector<std::string> command = {"sudo", "-n"};
+  command.insert(command.end(), arguments.begin(), arguments.end());
+  return run_process(command);
+}
+
+bool SystemdCommanderScreen::perform_selected_unit_action(const std::string & action) {
+  const std::string unit_name = backend_->selected_unit_name();
+  if (unit_name.empty()) {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "No service selected.";
+    return true;
+  }
+
+  std::string error;
+  if (backend_->client_.execute_unit_action(unit_name, action, &error)) {
+    backend_->refresh_units();
+    backend_->refresh_selected_unit_details();
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Ran `" + action + "` for " + unit_name + ".";
+    return true;
+  }
+
+  const ProcessResult result = run_sudo_command(
+    {"systemctl", "--no-ask-password", action, unit_name},
+    "Authentication required to " + action + " " + unit_name + ".");
+  if (!result.succeeded()) {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    if (!result.output.empty()) {
+      backend_->status_line_ = trim(result.output);
+    } else if (!error.empty()) {
+      backend_->status_line_ = error;
+    } else {
+      backend_->status_line_ = "Failed to " + action + " " + unit_name + ".";
+    }
+    return true;
+  }
+
+  backend_->refresh_units();
+  backend_->refresh_selected_unit_details();
+  std::lock_guard<std::mutex> lock(backend_->mutex_);
+  backend_->status_line_ = "Ran `" + action + "` for " + unit_name + " via sudo.";
+  return true;
+}
+
+bool SystemdCommanderScreen::reload_systemd_manager(bool prefer_sudo) {
+  if (!prefer_sudo) {
+    const ProcessResult direct_result = run_process(
+      {"systemctl", "--no-ask-password", "daemon-reload"});
+    if (direct_result.succeeded()) {
+      return true;
+    }
+  }
+
+  const ProcessResult sudo_result = run_sudo_command(
+    {"systemctl", "--no-ask-password", "daemon-reload"},
+    "Authentication required to reload the systemd manager.");
+  if (!sudo_result.succeeded()) {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ =
+      sudo_result.output.empty() ? "systemctl daemon-reload failed." : trim(sudo_result.output);
+    return false;
+  }
+
+  return true;
+}
+
 bool SystemdCommanderScreen::launch_selected_logs() {
   const std::string unit_name = backend_->selected_unit_name();
   if (unit_name.empty()) {
@@ -607,34 +751,85 @@ bool SystemdCommanderScreen::save_editor() {
     return true;
   }
 
-  std::ofstream output(editor_path_, std::ios::trunc);
-  if (!output.is_open()) {
-    std::lock_guard<std::mutex> lock(backend_->mutex_);
-    backend_->status_line_ = "Failed to open " + editor_path_ + " for writing.";
-    return true;
-  }
+  auto write_lines = [&](std::ostream & stream) {
+    for (std::size_t index = 0; index < editor_lines_.size(); ++index) {
+      stream << editor_lines_[index];
+      if (index + 1 < editor_lines_.size() || !editor_lines_[index].empty()) {
+        stream << '\n';
+      }
+    }
+  };
 
-  for (std::size_t index = 0; index < editor_lines_.size(); ++index) {
-    output << editor_lines_[index];
-    if (index + 1 < editor_lines_.size() || !editor_lines_[index].empty()) {
-      output << '\n';
+  bool saved = false;
+  bool used_sudo = false;
+  {
+    std::ofstream output(editor_path_, std::ios::trunc);
+    if (output.is_open()) {
+      write_lines(output);
+      output.close();
+      saved = static_cast<bool>(output);
     }
   }
-  output.close();
-  if (!output) {
+
+  if (!saved) {
+    char temp_template[] = "/tmp/ros2_console_tools_service_XXXXXX";
+    const int temp_fd = mkstemp(temp_template);
+    if (temp_fd == -1) {
+      std::lock_guard<std::mutex> lock(backend_->mutex_);
+      backend_->status_line_ = "Failed to create a temporary file for privileged save.";
+      return true;
+    }
+
+    {
+      std::ofstream temp_output(temp_template, std::ios::trunc);
+      if (!temp_output.is_open()) {
+        close(temp_fd);
+        unlink(temp_template);
+        std::lock_guard<std::mutex> lock(backend_->mutex_);
+        backend_->status_line_ = "Failed to open a temporary file for privileged save.";
+        return true;
+      }
+      write_lines(temp_output);
+      temp_output.close();
+      if (!temp_output) {
+        close(temp_fd);
+        unlink(temp_template);
+        std::lock_guard<std::mutex> lock(backend_->mutex_);
+        backend_->status_line_ = "Failed while writing a temporary file for privileged save.";
+        return true;
+      }
+    }
+    close(temp_fd);
+
+    const ProcessResult install_result = run_sudo_command(
+      {"install", "-m", "0644", temp_template, editor_path_},
+      "Authentication required to save " + editor_path_ + ".");
+    unlink(temp_template);
+    if (!install_result.succeeded()) {
+      std::lock_guard<std::mutex> lock(backend_->mutex_);
+      backend_->status_line_ =
+        install_result.output.empty() ? ("Failed to save " + editor_path_ + ".") : trim(install_result.output);
+      return true;
+    }
+    saved = true;
+    used_sudo = true;
+  }
+
+  if (!saved) {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
-    backend_->status_line_ = "Failed while writing " + editor_path_ + ".";
+    backend_->status_line_ = "Failed to save " + editor_path_ + ".";
     return true;
   }
 
   editor_dirty_ = false;
-  std::string status_message = "Saved " + editor_path_ + ".";
-  const ProcessResult reload_result = run_process({"systemctl", "daemon-reload"});
-  if (reload_result.succeeded()) {
-    status_message += " Reloaded systemd manager.";
-  } else {
-    status_message += " `systemctl daemon-reload` failed.";
+  std::string status_message = "Saved " + editor_path_;
+  if (used_sudo) {
+    status_message += " via sudo";
   }
+  status_message += ".";
+
+  const bool reload_ok = reload_systemd_manager(used_sudo);
+  status_message += reload_ok ? " Reloaded systemd manager." : " `systemctl daemon-reload` failed.";
 
   backend_->refresh_units();
   backend_->refresh_selected_unit_details();

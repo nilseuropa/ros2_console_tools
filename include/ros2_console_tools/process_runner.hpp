@@ -18,6 +18,7 @@ struct ProcessResult {
 };
 
 ProcessResult run_process(const std::vector<std::string> & arguments);
+ProcessResult run_process_interactive(const std::vector<std::string> & arguments);
 
 }  // namespace ros2_console_tools
 
