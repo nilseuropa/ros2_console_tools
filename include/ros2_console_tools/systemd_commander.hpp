@@ -31,6 +31,7 @@ private:
   void refresh_selected_unit_details();
   void clamp_selection();
   std::string selected_unit_name() const;
+  std::string selected_fragment_path() const;
   std::vector<SystemdDetailRow> detail_rows_snapshot() const;
   bool perform_action(const std::string & action);
 
@@ -56,17 +57,34 @@ private:
   bool handle_search_key(int key);
   bool handle_unit_list_key(int key);
   bool handle_detail_popup_key(int key);
+  bool handle_editor_key(int key);
   bool launch_selected_logs();
+  bool open_selected_service_editor();
+  bool save_editor();
+  void close_editor();
   int page_step() const;
   void draw();
   void draw_unit_list(int top, int left, int bottom, int right);
   void draw_detail_popup(int rows, int columns);
+  void draw_editor(int top, int left, int bottom, int right);
   void draw_status_line(int row, int columns) const;
   void draw_help_line(int row, int columns) const;
 
   std::shared_ptr<SystemdCommanderBackend> backend_;
   bool embedded_mode_{false};
   tui::SearchState search_state_;
+  bool editor_open_{false};
+  bool editor_dirty_{false};
+  bool editor_return_to_detail_popup_{false};
+  std::string editor_path_;
+  std::vector<std::string> editor_lines_;
+  bool editor_cursor_visible_{false};
+  int editor_cursor_screen_row_{0};
+  int editor_cursor_screen_column_{0};
+  int editor_cursor_row_{0};
+  int editor_cursor_column_{0};
+  int editor_scroll_row_{0};
+  int editor_scroll_column_{0};
   int detail_scroll_{0};
   bool detail_popup_open_{false};
   tui::TerminalPane terminal_pane_;

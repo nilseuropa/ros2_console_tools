@@ -3,10 +3,14 @@
 #include <ncursesw/ncurses.h>
 
 #include <algorithm>
+#include <cctype>
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <vector>
 
 #include "ros2_console_tools/journal_viewer.hpp"
+#include "ros2_console_tools/process_runner.hpp"
 
 namespace ros2_console_tools {
 
@@ -24,6 +28,7 @@ enum ColorPairId {
   kColorHeader = tui::kColorHeader,
   kColorSelection = tui::kColorSelection,
   kColorPositive = tui::kColorPositive,
+  kColorAccent = tui::kColorAccent,
   kColorPopup = tui::kColorPopup,
   kColorWarn = tui::kColorWarn,
   kColorError = tui::kColorError,
@@ -61,6 +66,62 @@ int unit_state_color(const SystemdUnitSummary & unit, bool selected) {
     return kColorWarn;
   }
   return 0;
+}
+
+struct StyledSpan {
+  std::string text;
+  int color{0};
+};
+
+std::string trim_left(std::string text) {
+  const auto first_non_space = std::find_if(
+    text.begin(), text.end(),
+    [](unsigned char ch) { return std::isspace(ch) == 0; });
+  text.erase(text.begin(), first_non_space);
+  return text;
+}
+
+std::vector<StyledSpan> highlight_unit_line(const std::string & line) {
+  std::vector<StyledSpan> spans;
+  auto push_span = [&](const std::string & text, int color) {
+    if (text.empty()) {
+      return;
+    }
+    if (!spans.empty() && spans.back().color == color) {
+      spans.back().text += text;
+    } else {
+      spans.push_back({text, color});
+    }
+  };
+
+  const std::string trimmed = trim_left(line);
+  if (trimmed.empty()) {
+    push_span(line, 0);
+    return spans;
+  }
+  if (trimmed.front() == '#' || trimmed.front() == ';') {
+    push_span(line, kColorAccent);
+    return spans;
+  }
+  if (trimmed.front() == '[' && trimmed.back() == ']') {
+    const std::size_t section_start = line.find('[');
+    if (section_start != std::string::npos) {
+      push_span(line.substr(0, section_start), 0);
+      push_span(line.substr(section_start), kColorHeader);
+      return spans;
+    }
+  }
+
+  const std::size_t equals = line.find('=');
+  if (equals != std::string::npos) {
+    push_span(line.substr(0, equals), kColorWarn);
+    push_span("=", 0);
+    push_span(line.substr(equals + 1), kColorPositive);
+    return spans;
+  }
+
+  push_span(line, 0);
+  return spans;
 }
 
 }  // namespace
@@ -130,6 +191,10 @@ bool SystemdCommanderScreen::handle_key(int key) {
     return handle_search_key(key);
   }
 
+  if (editor_open_) {
+    return handle_editor_key(key);
+  }
+
   if (detail_popup_open_) {
     switch (key) {
       case KEY_F(10):
@@ -150,6 +215,8 @@ bool SystemdCommanderScreen::handle_key(int key) {
       case KEY_F(6):
         detail_scroll_ = 0;
         return backend_->perform_action("reload");
+      case KEY_F(7):
+        return open_selected_service_editor();
       case KEY_F(9):
         return launch_selected_logs();
       default:
@@ -349,6 +416,137 @@ bool SystemdCommanderScreen::handle_detail_popup_key(int key) {
   }
 }
 
+bool SystemdCommanderScreen::handle_editor_key(int key) {
+  if (editor_lines_.empty()) {
+    editor_lines_.push_back("");
+  }
+
+  auto clamp_cursor = [&]() {
+    editor_cursor_row_ = std::clamp(editor_cursor_row_, 0, static_cast<int>(editor_lines_.size()) - 1);
+    editor_cursor_column_ = std::clamp(
+      editor_cursor_column_, 0, static_cast<int>(editor_lines_[static_cast<std::size_t>(editor_cursor_row_)].size()));
+  };
+
+  switch (key) {
+    case KEY_F(10):
+      return false;
+    case KEY_F(2):
+      return save_editor();
+    case 27:
+      close_editor();
+      return true;
+    case KEY_UP:
+      if (editor_cursor_row_ > 0) {
+        --editor_cursor_row_;
+      }
+      clamp_cursor();
+      return true;
+    case KEY_DOWN:
+      if (editor_cursor_row_ + 1 < static_cast<int>(editor_lines_.size())) {
+        ++editor_cursor_row_;
+      }
+      clamp_cursor();
+      return true;
+    case KEY_LEFT:
+      if (editor_cursor_column_ > 0) {
+        --editor_cursor_column_;
+      } else if (editor_cursor_row_ > 0) {
+        --editor_cursor_row_;
+        editor_cursor_column_ = static_cast<int>(editor_lines_[static_cast<std::size_t>(editor_cursor_row_)].size());
+      }
+      clamp_cursor();
+      return true;
+    case KEY_RIGHT:
+      if (editor_cursor_column_ <
+        static_cast<int>(editor_lines_[static_cast<std::size_t>(editor_cursor_row_)].size()))
+      {
+        ++editor_cursor_column_;
+      } else if (editor_cursor_row_ + 1 < static_cast<int>(editor_lines_.size())) {
+        ++editor_cursor_row_;
+        editor_cursor_column_ = 0;
+      }
+      clamp_cursor();
+      return true;
+    case KEY_HOME:
+      editor_cursor_column_ = 0;
+      return true;
+    case KEY_END:
+      editor_cursor_column_ =
+        static_cast<int>(editor_lines_[static_cast<std::size_t>(editor_cursor_row_)].size());
+      return true;
+    case KEY_PPAGE:
+      editor_cursor_row_ = std::max(0, editor_cursor_row_ - page_step());
+      clamp_cursor();
+      return true;
+    case KEY_NPAGE:
+      editor_cursor_row_ = std::min(
+        static_cast<int>(editor_lines_.size()) - 1, editor_cursor_row_ + page_step());
+      clamp_cursor();
+      return true;
+    case KEY_BACKSPACE:
+    case 127:
+    case '\b':
+      if (editor_cursor_column_ > 0) {
+        auto & line = editor_lines_[static_cast<std::size_t>(editor_cursor_row_)];
+        line.erase(static_cast<std::size_t>(editor_cursor_column_ - 1), 1);
+        --editor_cursor_column_;
+        editor_dirty_ = true;
+      } else if (editor_cursor_row_ > 0) {
+        std::string current_line = editor_lines_[static_cast<std::size_t>(editor_cursor_row_)];
+        editor_cursor_column_ =
+          static_cast<int>(editor_lines_[static_cast<std::size_t>(editor_cursor_row_ - 1)].size());
+        editor_lines_[static_cast<std::size_t>(editor_cursor_row_ - 1)] += current_line;
+        editor_lines_.erase(editor_lines_.begin() + editor_cursor_row_);
+        --editor_cursor_row_;
+        editor_dirty_ = true;
+      }
+      clamp_cursor();
+      return true;
+    case KEY_DC:
+      {
+        auto & line = editor_lines_[static_cast<std::size_t>(editor_cursor_row_)];
+        if (editor_cursor_column_ < static_cast<int>(line.size())) {
+          line.erase(static_cast<std::size_t>(editor_cursor_column_), 1);
+          editor_dirty_ = true;
+        } else if (editor_cursor_row_ + 1 < static_cast<int>(editor_lines_.size())) {
+          line += editor_lines_[static_cast<std::size_t>(editor_cursor_row_ + 1)];
+          editor_lines_.erase(editor_lines_.begin() + editor_cursor_row_ + 1);
+          editor_dirty_ = true;
+        }
+      }
+      clamp_cursor();
+      return true;
+    case '\n':
+    case KEY_ENTER:
+      {
+        auto & line = editor_lines_[static_cast<std::size_t>(editor_cursor_row_)];
+        std::string remainder = line.substr(static_cast<std::size_t>(editor_cursor_column_));
+        line.erase(static_cast<std::size_t>(editor_cursor_column_));
+        editor_lines_.insert(editor_lines_.begin() + editor_cursor_row_ + 1, remainder);
+        ++editor_cursor_row_;
+        editor_cursor_column_ = 0;
+        editor_dirty_ = true;
+      }
+      clamp_cursor();
+      return true;
+    case '\t':
+      editor_lines_[static_cast<std::size_t>(editor_cursor_row_)].insert(
+        static_cast<std::size_t>(editor_cursor_column_), "  ");
+      editor_cursor_column_ += 2;
+      editor_dirty_ = true;
+      return true;
+    default:
+      if (key >= 32 && key <= 126) {
+        editor_lines_[static_cast<std::size_t>(editor_cursor_row_)].insert(
+          static_cast<std::size_t>(editor_cursor_column_), 1, static_cast<char>(key));
+        ++editor_cursor_column_;
+        editor_dirty_ = true;
+      }
+      clamp_cursor();
+      return true;
+  }
+}
+
 bool SystemdCommanderScreen::launch_selected_logs() {
   const std::string unit_name = backend_->selected_unit_name();
   if (unit_name.empty()) {
@@ -359,6 +557,105 @@ bool SystemdCommanderScreen::launch_selected_logs() {
 
   (void)run_journal_viewer_tool(unit_name, true);
   return true;
+}
+
+bool SystemdCommanderScreen::open_selected_service_editor() {
+  const std::string fragment_path = backend_->selected_fragment_path();
+  if (fragment_path.empty() || fragment_path == "/dev/null") {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Selected service does not expose an editable FragmentPath.";
+    return true;
+  }
+
+  std::ifstream input(fragment_path);
+  if (!input.is_open()) {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Failed to open " + fragment_path + " for editing.";
+    return true;
+  }
+
+  editor_lines_.clear();
+  std::string line;
+  while (std::getline(input, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    editor_lines_.push_back(line);
+  }
+  if (editor_lines_.empty()) {
+    editor_lines_.push_back("");
+  }
+
+  editor_path_ = fragment_path;
+  editor_cursor_row_ = 0;
+  editor_cursor_column_ = 0;
+  editor_scroll_row_ = 0;
+  editor_scroll_column_ = 0;
+  editor_dirty_ = false;
+  editor_open_ = true;
+  editor_return_to_detail_popup_ = detail_popup_open_;
+  detail_popup_open_ = false;
+  search_state_.active = false;
+
+  std::lock_guard<std::mutex> lock(backend_->mutex_);
+  backend_->status_line_ = "Editing " + fragment_path + ". F2 saves changes.";
+  return true;
+}
+
+bool SystemdCommanderScreen::save_editor() {
+  if (editor_path_.empty()) {
+    return true;
+  }
+
+  std::ofstream output(editor_path_, std::ios::trunc);
+  if (!output.is_open()) {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Failed to open " + editor_path_ + " for writing.";
+    return true;
+  }
+
+  for (std::size_t index = 0; index < editor_lines_.size(); ++index) {
+    output << editor_lines_[index];
+    if (index + 1 < editor_lines_.size() || !editor_lines_[index].empty()) {
+      output << '\n';
+    }
+  }
+  output.close();
+  if (!output) {
+    std::lock_guard<std::mutex> lock(backend_->mutex_);
+    backend_->status_line_ = "Failed while writing " + editor_path_ + ".";
+    return true;
+  }
+
+  editor_dirty_ = false;
+  std::string status_message = "Saved " + editor_path_ + ".";
+  const ProcessResult reload_result = run_process({"systemctl", "daemon-reload"});
+  if (reload_result.succeeded()) {
+    status_message += " Reloaded systemd manager.";
+  } else {
+    status_message += " `systemctl daemon-reload` failed.";
+  }
+
+  backend_->refresh_units();
+  backend_->refresh_selected_unit_details();
+
+  std::lock_guard<std::mutex> lock(backend_->mutex_);
+  backend_->status_line_ = status_message;
+  return true;
+}
+
+void SystemdCommanderScreen::close_editor() {
+  editor_open_ = false;
+  editor_dirty_ = false;
+  editor_path_.clear();
+  editor_lines_.clear();
+  editor_cursor_row_ = 0;
+  editor_cursor_column_ = 0;
+  editor_scroll_row_ = 0;
+  editor_scroll_column_ = 0;
+  detail_popup_open_ = editor_return_to_detail_popup_;
+  editor_return_to_detail_popup_ = false;
+  curs_set(0);
 }
 
 int SystemdCommanderScreen::page_step() const {
@@ -379,21 +676,34 @@ void SystemdCommanderScreen::draw() {
   const int help_row = layout.help_row;
   const int status_row = layout.status_row;
   const int content_bottom = layout.content_bottom;
+  editor_cursor_visible_ = false;
 
   draw_box(0, 0, content_bottom, columns - 1, kColorFrame);
   attron(theme_attr(kColorTitle));
   mvprintw(0, 1, "Systemd Commander ");
   attroff(theme_attr(kColorTitle));
 
-  draw_unit_list(1, 1, content_bottom - 1, columns - 2);
+  if (editor_open_) {
+    draw_editor(1, 1, content_bottom - 1, columns - 2);
+  } else {
+    draw_unit_list(1, 1, content_bottom - 1, columns - 2);
+  }
   draw_status_line(status_row, columns);
   draw_help_line(help_row, columns);
-  draw_search_box(layout.pane_rows, columns, search_state_);
-  if (detail_popup_open_) {
+  if (!editor_open_) {
+    draw_search_box(layout.pane_rows, columns, search_state_);
+  }
+  if (!editor_open_ && detail_popup_open_) {
     draw_detail_popup(layout.pane_rows, columns);
   }
   if (terminal_pane_.visible()) {
     terminal_pane_.draw(layout.terminal_top, 0, rows - 1, columns - 1);
+  }
+  if (editor_open_ && !terminal_pane_.visible() && editor_cursor_visible_) {
+    move(editor_cursor_screen_row_, editor_cursor_screen_column_);
+    curs_set(1);
+  } else if (!terminal_pane_.visible()) {
+    curs_set(0);
   }
   refresh();
 }
@@ -499,12 +809,108 @@ void SystemdCommanderScreen::draw_detail_popup(int rows, int columns) {
     help_row,
     left + 1,
     box_width - 2,
-    "F2 Start  F3 Stop  F5 Restart  F6 Reload  F9 Logs  Esc Close");
+    "F2 Start  F3 Stop  F5 Restart  F6 Reload  F7 Edit  F9 Logs  Esc Close");
+}
+
+void SystemdCommanderScreen::draw_editor(int top, int left, int bottom, int right) {
+  if (editor_lines_.empty()) {
+    editor_lines_.push_back("");
+  }
+
+  const int width = right - left + 1;
+  const int visible_rows = std::max(1, bottom - top);
+  const int line_number_width = std::max(
+    4, static_cast<int>(std::to_string(std::max(1, static_cast<int>(editor_lines_.size()))).size()));
+  const int prefix_width = line_number_width + 3;
+  const int text_width = std::max(1, width - prefix_width);
+
+  editor_cursor_row_ = std::clamp(editor_cursor_row_, 0, static_cast<int>(editor_lines_.size()) - 1);
+  editor_cursor_column_ = std::clamp(
+    editor_cursor_column_, 0,
+    static_cast<int>(editor_lines_[static_cast<std::size_t>(editor_cursor_row_)].size()));
+
+  if (editor_cursor_row_ < editor_scroll_row_) {
+    editor_scroll_row_ = editor_cursor_row_;
+  }
+  if (editor_cursor_row_ >= editor_scroll_row_ + visible_rows) {
+    editor_scroll_row_ = editor_cursor_row_ - visible_rows + 1;
+  }
+  if (editor_cursor_column_ < editor_scroll_column_) {
+    editor_scroll_column_ = editor_cursor_column_;
+  }
+  if (editor_cursor_column_ >= editor_scroll_column_ + text_width) {
+    editor_scroll_column_ = editor_cursor_column_ - text_width + 1;
+  }
+
+  const std::string title = truncate_text(
+    std::string(editor_dirty_ ? "Edit* " : "Edit ") + editor_path_, width);
+  attron(theme_attr(kColorHeader));
+  mvprintw(top, left, "%-*s", width, title.c_str());
+  attroff(theme_attr(kColorHeader));
+
+  for (int row = top + 1; row <= bottom; ++row) {
+    mvhline(row, left, ' ', width);
+    const int line_index = editor_scroll_row_ + (row - top - 1);
+    if (line_index >= static_cast<int>(editor_lines_.size())) {
+      continue;
+    }
+
+    const bool current_line = line_index == editor_cursor_row_;
+    const std::string line_number = std::to_string(line_index + 1);
+    const std::string prefix =
+      std::string(current_line ? ">" : " ") +
+      std::string(line_number_width - static_cast<int>(line_number.size()), ' ') +
+      line_number + " ";
+    attron(theme_attr(kColorHeader));
+    mvaddnstr(row, left, prefix.c_str(), prefix_width);
+    attroff(theme_attr(kColorHeader));
+
+    const std::string & full_line = editor_lines_[static_cast<std::size_t>(line_index)];
+    const std::string visible_text =
+      editor_scroll_column_ < static_cast<int>(full_line.size())
+      ? full_line.substr(static_cast<std::size_t>(editor_scroll_column_))
+      : "";
+    int column = left + prefix_width;
+    int drawn = 0;
+    for (const auto & span : highlight_unit_line(visible_text)) {
+      if (drawn >= text_width) {
+        break;
+      }
+      const std::string text = truncate_text(span.text, text_width - drawn);
+      if (span.color != 0) {
+        attron(COLOR_PAIR(span.color));
+      }
+      mvaddnstr(row, column, text.c_str(), text_width - drawn);
+      if (span.color != 0) {
+        attroff(COLOR_PAIR(span.color));
+      }
+      column += static_cast<int>(text.size());
+      drawn += static_cast<int>(text.size());
+    }
+  }
+
+  const int cursor_screen_row = top + 1 + (editor_cursor_row_ - editor_scroll_row_);
+  const int cursor_screen_column = left + prefix_width + (editor_cursor_column_ - editor_scroll_column_);
+  if (cursor_screen_row >= top + 1 && cursor_screen_row <= bottom &&
+    cursor_screen_column >= left + prefix_width && cursor_screen_column <= right)
+  {
+    editor_cursor_visible_ = true;
+    editor_cursor_screen_row_ = cursor_screen_row;
+    editor_cursor_screen_column_ = cursor_screen_column;
+  } else {
+    editor_cursor_visible_ = false;
+  }
 }
 
 void SystemdCommanderScreen::draw_status_line(int row, int columns) const {
   std::string status_line;
-  {
+  if (editor_open_) {
+    status_line =
+      std::string(editor_dirty_ ? "Modified  " : "Saved  ") +
+      "line=" + std::to_string(editor_cursor_row_ + 1) +
+      " col=" + std::to_string(editor_cursor_column_ + 1) +
+      "  " + editor_path_;
+  } else {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
     status_line = backend_->status_line_;
   }
@@ -512,6 +918,15 @@ void SystemdCommanderScreen::draw_status_line(int row, int columns) const {
 }
 
 void SystemdCommanderScreen::draw_help_line(int row, int columns) const {
+  if (editor_open_) {
+    draw_help_bar(
+      row,
+      columns,
+      tui::with_terminal_help(
+        "Arrows Move  Enter Split Line  Backspace/Delete Delete  F2 Save  Esc Back  F10 Exit",
+        terminal_pane_.visible()));
+    return;
+  }
   draw_help_bar(
     row,
     columns,
