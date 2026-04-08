@@ -64,6 +64,28 @@ TEST_F(ImageViewerBackendTest, ConvertsBgr8ImageToGrayscale) {
   EXPECT_EQ(frame.gray8[1], 150u);
 }
 
+TEST_F(ImageViewerBackendTest, ExtractsLumaFromYuv422Yuy2Image) {
+  ImageViewerBackend backend("/camera/image");
+  sensor_msgs::msg::Image image;
+  image.width = 4;
+  image.height = 1;
+  image.step = 8;
+  image.encoding = "yuv422_yuy2";
+  image.data = {
+    12, 128, 34, 140,
+    56, 120, 78, 130,
+  };
+
+  ImageFrame frame;
+  std::string error;
+  ASSERT_TRUE(backend.decode_to_frame(image, frame, error)) << error;
+  ASSERT_EQ(frame.gray8.size(), 4u);
+  EXPECT_EQ(frame.gray8[0], 12u);
+  EXPECT_EQ(frame.gray8[1], 34u);
+  EXPECT_EQ(frame.gray8[2], 56u);
+  EXPECT_EQ(frame.gray8[3], 78u);
+}
+
 TEST_F(ImageViewerBackendTest, RejectsUnsupportedEncodings) {
   ImageViewerBackend backend("/camera/image");
   sensor_msgs::msg::Image image;

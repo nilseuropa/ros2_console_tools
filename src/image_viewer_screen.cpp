@@ -94,7 +94,7 @@ RenderGeometry compute_render_geometry(
   int pan_x,
   int pan_y)
 {
-  const double cell_aspect = 2.0;
+  const double cell_height_over_width = 2.0;
   const double source_width = static_cast<double>(frame.width);
   const double source_height = static_cast<double>(frame.height);
   const double window_width = std::max(1.0, source_width / std::max(1.0, zoom_factor));
@@ -109,24 +109,28 @@ RenderGeometry compute_render_geometry(
   const double offset_x = std::clamp(center_x - window_width / 2.0, 0.0, std::max(0.0, source_width - window_width));
   const double offset_y = std::clamp(center_y - window_height / 2.0, 0.0, std::max(0.0, source_height - window_height));
 
-  const double available_virtual_width = std::max(1.0, static_cast<double>(inner_width) * cell_aspect);
-  const double available_height = std::max(1.0, static_cast<double>(inner_height));
+  const double available_width = std::max(1.0, static_cast<double>(inner_width));
+  const double available_virtual_height =
+    std::max(1.0, static_cast<double>(inner_height) * cell_height_over_width);
   const double source_aspect = window_width / window_height;
-  const double available_aspect = available_virtual_width / available_height;
+  const double available_aspect = available_width / available_virtual_height;
 
   int render_width = inner_width;
   int render_height = inner_height;
   if (source_aspect > available_aspect) {
     render_width = inner_width;
     render_height = std::max(
-      1, std::min(inner_height, static_cast<int>(std::lround(available_virtual_width / source_aspect))));
+      1,
+      std::min(
+        inner_height,
+        static_cast<int>(std::lround(available_width / (source_aspect * cell_height_over_width)))));
   } else {
     render_height = inner_height;
     render_width = std::max(
       1,
       std::min(
         inner_width,
-        static_cast<int>(std::lround((source_aspect * available_height) / cell_aspect))));
+        static_cast<int>(std::lround(source_aspect * available_virtual_height))));
   }
 
   return {render_width, render_height, window_width, window_height, offset_x, offset_y};

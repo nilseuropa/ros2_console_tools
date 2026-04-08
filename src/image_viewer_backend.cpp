@@ -90,6 +90,7 @@ bool ImageViewerBackend::decode_to_frame(
     Bgr,
     Rgba,
     Bgra,
+    Yuy2,
   };
   PixelLayout layout = PixelLayout::Mono;
 
@@ -108,6 +109,12 @@ bool ImageViewerBackend::decode_to_frame(
   } else if (encoding == "bgra8") {
     channels = 4;
     layout = PixelLayout::Bgra;
+  } else if (
+    encoding == "yuv422_yuy2" || encoding == "yuy2" ||
+    encoding == "yuyv" || encoding == "yuv422")
+  {
+    channels = 2;
+    layout = PixelLayout::Yuy2;
   } else {
     error = "unsupported encoding '" + message.encoding + "'";
     return false;
@@ -151,6 +158,12 @@ bool ImageViewerBackend::decode_to_frame(
           frame.gray8[dst] = luma_from_rgb(
             message.data[src + 2], message.data[src + 1], message.data[src]);
           break;
+        case PixelLayout::Yuy2: {
+          const std::size_t pair_src =
+            row_offset + (static_cast<std::size_t>(column) / 2u) * 4u + ((column % 2u) == 0u ? 0u : 2u);
+          frame.gray8[dst] = message.data[pair_src];
+          break;
+        }
       }
     }
   }
