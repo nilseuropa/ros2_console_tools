@@ -168,7 +168,6 @@ std::vector<SystemdDetailRow> SystemdCommanderBackend::detail_rows_snapshot() co
       "  stop=" + std::string(selected_unit_details_.can_stop ? "yes" : "no") +
       "  reload=" + std::string(selected_unit_details_.can_reload ? "yes" : "no"),
       false});
-  rows.push_back({"F2 Start  F3 Stop  F5 Restart  F6 Reload  F9 Logs", false});
   return rows;
 }
 

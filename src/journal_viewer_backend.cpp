@@ -1,6 +1,7 @@
 #include "ros2_console_tools/journal_viewer.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <sstream>
 
 namespace ros2_console_tools {
@@ -9,6 +10,25 @@ namespace {
 
 std::string entry_identity(const JournalEntry & entry) {
   return entry.timestamp + "|" + entry.unit + "|" + entry.identifier + "|" + entry.message;
+}
+
+std::string build_status_line(
+  std::size_t entry_count,
+  const std::string & unit_filter,
+  int max_priority,
+  const std::string & text_filter,
+  bool live_mode)
+{
+  std::string status = std::string(live_mode ? "Live" : "Snapshot");
+  status += "  " + std::to_string(entry_count) + " journal entries";
+  if (!unit_filter.empty()) {
+    status += " for " + unit_filter;
+  }
+  status += "  priority<=" + journal_priority_label(max_priority);
+  if (!text_filter.empty()) {
+    status += "  filter=" + text_filter;
+  }
+  return status;
 }
 
 }  // namespace
@@ -43,6 +63,7 @@ void JournalViewerBackend::refresh_entries() {
   }
 
   entries_ = std::move(entries);
+  last_live_refresh_time_ = std::chrono::steady_clock::now();
   if (!previous_identity.empty()) {
     const auto found = std::find_if(
       entries_.begin(), entries_.end(),
@@ -54,17 +75,25 @@ void JournalViewerBackend::refresh_entries() {
     }
   }
   clamp_selection();
+  status_line_ = build_status_line(
+    entries_.size(), unit_filter_, max_priority_, text_filter_, live_mode_);
+}
 
-  std::string status =
-    "Loaded " + std::to_string(entries_.size()) + " journal entries";
-  if (!unit_filter_.empty()) {
-    status += " for " + unit_filter_;
+void JournalViewerBackend::maybe_poll_live_updates() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!live_mode_) {
+      return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (last_live_refresh_time_ != std::chrono::steady_clock::time_point::min() &&
+      now - last_live_refresh_time_ < std::chrono::seconds(1))
+    {
+      return;
+    }
   }
-  status += " with priority <= " + journal_priority_label(max_priority_) + ".";
-  if (!text_filter_.empty()) {
-    status += " Filter: " + text_filter_;
-  }
-  status_line_ = status;
+
+  refresh_entries();
 }
 
 void JournalViewerBackend::clamp_selection() {
@@ -95,6 +124,30 @@ void JournalViewerBackend::set_text_filter(const std::string & filter_text) {
     text_filter_ = filter_text;
   }
   refresh_entries();
+}
+
+void JournalViewerBackend::toggle_live_mode() {
+  bool refresh_now = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    live_mode_ = !live_mode_;
+    if (live_mode_) {
+      last_live_refresh_time_ = std::chrono::steady_clock::time_point::min();
+      refresh_now = true;
+    } else {
+      status_line_ = build_status_line(
+        entries_.size(), unit_filter_, max_priority_, text_filter_, live_mode_);
+    }
+  }
+
+  if (refresh_now) {
+    refresh_entries();
+  }
+}
+
+bool JournalViewerBackend::live_mode_enabled() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return live_mode_;
 }
 
 std::string JournalViewerBackend::priority_filter_label() const {

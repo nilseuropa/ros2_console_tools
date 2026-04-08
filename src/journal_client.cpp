@@ -357,6 +357,7 @@ std::vector<JournalEntry> JournalClient::read_entries(
     "journalctl",
     "--no-pager",
     "--output=json",
+    "--reverse",
     "--lines=" + std::to_string(std::max(1, line_count)),
     "--priority=0.." + std::to_string(std::clamp(max_priority, 0, 7)),
   };

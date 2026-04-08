@@ -18,11 +18,6 @@ struct SystemdDetailRow {
   bool is_header{false};
 };
 
-enum class SystemdCommanderFocusPane {
-  UnitList,
-  DetailPane,
-};
-
 class SystemdCommanderScreen;
 
 class SystemdCommanderBackend {
@@ -60,20 +55,20 @@ private:
   bool handle_key(int key);
   bool handle_search_key(int key);
   bool handle_unit_list_key(int key);
-  bool handle_detail_key(int key);
+  bool handle_detail_popup_key(int key);
   bool launch_selected_logs();
   int page_step() const;
   void draw();
   void draw_unit_list(int top, int left, int bottom, int right);
-  void draw_detail_pane(int top, int left, int bottom, int right);
+  void draw_detail_popup(int rows, int columns);
   void draw_status_line(int row, int columns) const;
   void draw_help_line(int row, int columns) const;
 
   std::shared_ptr<SystemdCommanderBackend> backend_;
   bool embedded_mode_{false};
   tui::SearchState search_state_;
-  SystemdCommanderFocusPane focus_pane_{SystemdCommanderFocusPane::UnitList};
   int detail_scroll_{0};
+  bool detail_popup_open_{false};
   tui::TerminalPane terminal_pane_;
 };
 

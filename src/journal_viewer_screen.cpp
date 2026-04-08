@@ -35,7 +35,6 @@ using tui::draw_box;
 using tui::draw_help_bar;
 using tui::draw_search_box;
 using tui::draw_status_bar;
-using tui::draw_text_vline;
 using tui::find_best_match;
 using tui::handle_search_input;
 using tui::is_alt_binding;
@@ -103,6 +102,9 @@ int JournalViewerScreen::run() {
     draw();
     const int key = getch();
     if (key == ERR) {
+      if (!filter_prompt_open_ && !search_state_.active) {
+        backend_->maybe_poll_live_updates();
+      }
       continue;
     }
     running = handle_key(key);
@@ -141,13 +143,15 @@ bool JournalViewerScreen::handle_key(int key) {
     return handle_search_key(key);
   }
 
+  if (detail_popup_open_) {
+    return handle_detail_popup_key(key);
+  }
+
   switch (key) {
     case KEY_F(10):
       return false;
-    case '\t':
-      focus_pane_ = focus_pane_ == JournalViewerFocusPane::EntryList
-        ? JournalViewerFocusPane::DetailPane
-        : JournalViewerFocusPane::EntryList;
+    case KEY_F(2):
+      backend_->toggle_live_mode();
       return true;
     case KEY_F(4):
       detail_scroll_ = 0;
@@ -164,6 +168,14 @@ bool JournalViewerScreen::handle_key(int key) {
       }
       filter_prompt_open_ = true;
       return true;
+    case '\n':
+    case KEY_ENTER:
+      {
+        std::lock_guard<std::mutex> lock(backend_->mutex_);
+        detail_popup_open_ = !backend_->entries_.empty();
+      }
+      detail_scroll_ = 0;
+      return true;
     case 27:
       if (is_alt_binding(key, 's')) {
         start_search(search_state_);
@@ -179,10 +191,7 @@ bool JournalViewerScreen::handle_key(int key) {
       break;
   }
 
-  if (focus_pane_ == JournalViewerFocusPane::EntryList) {
-    return handle_entry_list_key(key);
-  }
-  return handle_detail_key(key);
+  return handle_entry_list_key(key);
 }
 
 bool JournalViewerScreen::handle_search_key(int key) {
@@ -304,19 +313,27 @@ bool JournalViewerScreen::handle_entry_list_key(int key) {
       return true;
     case '\n':
     case KEY_ENTER:
-      focus_pane_ = JournalViewerFocusPane::DetailPane;
+      detail_popup_open_ = !entries.empty();
+      detail_scroll_ = 0;
       return true;
     default:
       return true;
   }
 }
 
-bool JournalViewerScreen::handle_detail_key(int key) {
+bool JournalViewerScreen::handle_detail_popup_key(int key) {
   const auto rows = backend_->detail_rows_snapshot();
-  const int visible_rows = std::max(1, page_step());
+  int screen_rows = 0;
+  int screen_columns = 0;
+  getmaxyx(stdscr, screen_rows, screen_columns);
+  const int box_height = std::min(screen_rows - 4, std::max(8, screen_rows * 3 / 4));
+  const int visible_rows = std::max(1, box_height - 3);
   const int max_scroll = std::max(0, static_cast<int>(rows.size()) - visible_rows);
 
   switch (key) {
+    case 27:
+      detail_popup_open_ = false;
+      return true;
     case KEY_UP:
     case 'k':
       detail_scroll_ = std::max(0, detail_scroll_ - 1);
@@ -333,7 +350,7 @@ bool JournalViewerScreen::handle_detail_key(int key) {
       return true;
     case '\n':
     case KEY_ENTER:
-      focus_pane_ = JournalViewerFocusPane::EntryList;
+      detail_popup_open_ = false;
       return true;
     default:
       return true;
@@ -364,20 +381,15 @@ void JournalViewerScreen::draw() {
   mvprintw(0, 1, "Journal Viewer ");
   attroff(theme_attr(kColorTitle));
 
-  const int inner_width = std::max(2, columns - 2);
-  const int max_left_width = std::max(18, inner_width - 19);
-  const int left_width = std::clamp(inner_width / 2, 18, max_left_width);
-  const int separator_x = 1 + left_width;
-  draw_entry_list(1, 1, content_bottom - 1, separator_x - 1);
-  attron(COLOR_PAIR(kColorFrame));
-  draw_text_vline(1, separator_x, content_bottom - 1);
-  attroff(COLOR_PAIR(kColorFrame));
-  draw_detail_pane(1, separator_x + 1, content_bottom - 1, columns - 2);
+  draw_entry_list(1, 1, content_bottom - 1, columns - 2);
   draw_status_line(status_row, columns);
   draw_help_line(help_row, columns);
   draw_search_box(layout.pane_rows, columns, search_state_);
   if (filter_prompt_open_) {
     draw_filter_popup(layout.pane_rows, columns);
+  }
+  if (detail_popup_open_) {
+    draw_detail_popup(layout.pane_rows, columns);
   }
   if (terminal_pane_.visible()) {
     terminal_pane_.draw(layout.terminal_top, 0, rows - 1, columns - 1);
@@ -410,9 +422,7 @@ void JournalViewerScreen::draw_entry_list(int top, int left, int bottom, int rig
   }
 
   attron(theme_attr(kColorHeader));
-  mvprintw(
-    top, left, "%-*s", width,
-    focus_pane_ == JournalViewerFocusPane::EntryList ? "Entries <" : "Entries");
+  mvprintw(top, left, "%-*s", width, "Entries");
   attroff(theme_attr(kColorHeader));
 
   int row_y = top + 1;
@@ -420,8 +430,10 @@ void JournalViewerScreen::draw_entry_list(int top, int left, int bottom, int rig
   const int last_row = std::min(static_cast<int>(entries.size()), first_row + visible_rows);
   for (int index = first_row; index < last_row && row_y <= bottom; ++index, ++row_y) {
     const auto & entry = entries[static_cast<std::size_t>(index)];
-    const bool selected = focus_pane_ == JournalViewerFocusPane::EntryList && index == selected_index;
-    const std::string source = !entry.unit.empty() ? entry.unit : entry.identifier;
+    const bool selected = index == selected_index;
+    const std::string source = !entry.unit.empty()
+      ? entry.unit
+      : (!entry.identifier.empty() ? entry.identifier : "-");
     const std::string text =
       short_timestamp(entry.timestamp) +
       " [" + journal_priority_label(entry.priority) + "] " +
@@ -439,36 +451,51 @@ void JournalViewerScreen::draw_entry_list(int top, int left, int bottom, int rig
   }
 }
 
-void JournalViewerScreen::draw_detail_pane(int top, int left, int bottom, int right) {
-  const auto rows = backend_->detail_rows_snapshot();
+void JournalViewerScreen::draw_detail_popup(int total_rows, int total_columns) {
+  const auto detail_rows = backend_->detail_rows_snapshot();
+  if (total_rows < 8 || total_columns < 32) {
+    return;
+  }
+
+  const int box_width = std::min(total_columns - 4, std::max(32, total_columns * 4 / 5));
+  const int box_height = std::min(total_rows - 4, std::max(8, total_rows * 3 / 4));
+  const int left = std::max(2, (total_columns - box_width) / 2);
+  const int top = std::max(1, (total_rows - box_height) / 2);
+  const int right = left + box_width - 1;
+  const int bottom = top + box_height - 1;
   const int width = right - left + 1;
-  const int visible_rows = std::max(1, bottom - top);
-  const int max_scroll = std::max(0, static_cast<int>(rows.size()) - visible_rows);
+  const int visible_rows = std::max(1, box_height - 3);
+  const int max_scroll = std::max(0, static_cast<int>(detail_rows.size()) - visible_rows);
   detail_scroll_ = std::clamp(detail_scroll_, 0, max_scroll);
 
+  attron(theme_attr(kColorPopup));
+  for (int row = top + 1; row < bottom; ++row) {
+    mvhline(row, left + 1, ' ', box_width - 2);
+  }
+  attroff(theme_attr(kColorPopup));
+  draw_box(top, left, bottom, right, kColorFrame);
+
   attron(theme_attr(kColorHeader));
-  mvprintw(
-    top, left, "%-*s", width,
-    focus_pane_ == JournalViewerFocusPane::DetailPane ? "Details <" : "Details");
+  mvprintw(top, left + 2, " Entry Details ");
   attroff(theme_attr(kColorHeader));
 
   int row_y = top + 1;
   const int first_row = detail_scroll_;
-  const int last_row = std::min(static_cast<int>(rows.size()), first_row + visible_rows);
+  const int last_row = std::min(static_cast<int>(detail_rows.size()), first_row + visible_rows);
   for (int index = first_row; index < last_row && row_y <= bottom; ++index, ++row_y) {
-    const auto & row = rows[static_cast<std::size_t>(index)];
-    mvhline(row_y, left, ' ', width);
+    const auto & row = detail_rows[static_cast<std::size_t>(index)];
+    mvhline(row_y, left + 1, ' ', box_width - 2);
     if (row.is_header) {
       attron(theme_attr(kColorHeader));
-      mvaddnstr(row_y, left, truncate_text(row.text, width).c_str(), width);
+      mvaddnstr(row_y, left + 1, truncate_text(row.text, width - 2).c_str(), width - 2);
       attroff(theme_attr(kColorHeader));
     } else {
-      mvaddnstr(row_y, left, truncate_text(row.text, width).c_str(), width);
+      mvaddnstr(row_y, left + 1, truncate_text(row.text, width - 2).c_str(), width - 2);
     }
   }
 
-  for (; row_y <= bottom; ++row_y) {
-    mvhline(row_y, left, ' ', width);
+  for (; row_y < bottom; ++row_y) {
+    mvhline(row_y, left + 1, ' ', box_width - 2);
   }
 }
 
@@ -513,11 +540,13 @@ void JournalViewerScreen::draw_status_line(int row, int columns) const {
 
 void JournalViewerScreen::draw_help_line(int row, int columns) const {
   const std::string priority_label = backend_->priority_filter_label();
+  const bool live_mode = backend_->live_mode_enabled();
   draw_help_bar(
     row,
     columns,
     tui::with_terminal_help(
-      "Tab Switch Pane  F4 Refresh  F5 Priority:" + priority_label +
+      "Up/Down Move  Enter Details  F2 Live:" + std::string(live_mode ? "On" : "Off") +
+      "  F4 Refresh  F5 Priority:" + priority_label +
       "  F6 Text Filter  Alt+S Search  F10 Exit",
       terminal_pane_.visible()));
 }
