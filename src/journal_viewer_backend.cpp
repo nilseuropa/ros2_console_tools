@@ -17,10 +17,12 @@ std::string build_status_line(
   const std::string & unit_filter,
   int max_priority,
   const std::string & text_filter,
-  bool live_mode)
+  bool live_mode,
+  bool full_history)
 {
   std::string status = std::string(live_mode ? "Live" : "Snapshot");
-  status += "  " + std::to_string(entry_count) + " journal entries";
+  status += "  " + std::to_string(entry_count);
+  status += full_history ? " matching journal entries" : " recent journal entries";
   if (!unit_filter.empty()) {
     status += " for " + unit_filter;
   }
@@ -42,16 +44,20 @@ JournalViewerBackend::JournalViewerBackend(const std::string & initial_unit)
 
 void JournalViewerBackend::refresh_entries() {
   std::string previous_identity;
+  bool live_mode = true;
+  int requested_line_count = 0;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!entries_.empty() && selected_index_ >= 0 && selected_index_ < static_cast<int>(entries_.size())) {
       previous_identity = entry_identity(entries_[static_cast<std::size_t>(selected_index_)]);
     }
+    live_mode = live_mode_;
+    requested_line_count = live_mode_ ? line_count_ : 0;
   }
 
   std::string error;
   std::vector<JournalEntry> entries =
-    client_.read_entries(unit_filter_, max_priority_, line_count_, text_filter_, &error);
+    client_.read_entries(unit_filter_, max_priority_, requested_line_count, text_filter_, &error);
 
   std::lock_guard<std::mutex> lock(mutex_);
   if (entries.empty() && !error.empty()) {
@@ -76,7 +82,7 @@ void JournalViewerBackend::refresh_entries() {
   }
   clamp_selection();
   status_line_ = build_status_line(
-    entries_.size(), unit_filter_, max_priority_, text_filter_, live_mode_);
+    entries_.size(), unit_filter_, max_priority_, text_filter_, live_mode, requested_line_count <= 0);
 }
 
 void JournalViewerBackend::maybe_poll_live_updates() {
@@ -127,22 +133,13 @@ void JournalViewerBackend::set_text_filter(const std::string & filter_text) {
 }
 
 void JournalViewerBackend::toggle_live_mode() {
-  bool refresh_now = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     live_mode_ = !live_mode_;
-    if (live_mode_) {
-      last_live_refresh_time_ = std::chrono::steady_clock::time_point::min();
-      refresh_now = true;
-    } else {
-      status_line_ = build_status_line(
-        entries_.size(), unit_filter_, max_priority_, text_filter_, live_mode_);
-    }
+    last_live_refresh_time_ = std::chrono::steady_clock::time_point::min();
   }
 
-  if (refresh_now) {
-    refresh_entries();
-  }
+  refresh_entries();
 }
 
 bool JournalViewerBackend::live_mode_enabled() const {

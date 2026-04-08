@@ -358,9 +358,11 @@ std::vector<JournalEntry> JournalClient::read_entries(
     "--no-pager",
     "--output=json",
     "--reverse",
-    "--lines=" + std::to_string(std::max(1, line_count)),
     "--priority=0.." + std::to_string(std::clamp(max_priority, 0, 7)),
   };
+  if (line_count > 0) {
+    command.push_back("--lines=" + std::to_string(line_count));
+  }
   if (!unit_filter.empty()) {
     command.push_back("--unit=" + unit_filter);
   }
