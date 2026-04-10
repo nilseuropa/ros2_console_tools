@@ -2,7 +2,7 @@
 
 `ros2_console_tools` is a terminal-first toolbox for ROS 2 runtime inspection, visualization, and operator workflows, plus a small set of host-side tools for `systemd` service management and `journalctl` log reading.
 
-Current package release: `1.5.0`.
+Current package release: `1.5.2`.
 
 ![Node Commander demo](doc/ros2_console_tools_demo.gif)
 
@@ -99,7 +99,7 @@ There are now two backend styles in the repository:
 ## Notable Integration Points
 
 - `node_commander` is the main ROS entry point and launcher hub.
-- `topic_monitor` can open `map_viewer` for occupancy grids and `image_viewer` for image topics.
+- `topic_monitor` can open `map_viewer` for occupancy grids, `image_viewer` for image topics, and `joy_viewer` for joystick topics.
 - `systemd_commander` opens `journal_viewer` for the selected unit on `F9`.
 - `systemd_commander` keeps the main TUI unprivileged and only authenticates on demand for actions that require elevated privileges.
 
