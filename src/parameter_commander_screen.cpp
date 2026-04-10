@@ -244,16 +244,33 @@ bool ParameterCommanderScreen::handle_popup_key(int key) {
     case KEY_BACKSPACE:
     case 127:
     case '\b':
-      if (!popup_buffer_.empty() && backend_->popup_is_editable(*entry)) {
-        popup_buffer_.pop_back();
+      if (popup_cursor_index_ > 0 && backend_->popup_is_editable(*entry)) {
+        popup_buffer_.erase(popup_cursor_index_ - 1, 1);
+        --popup_cursor_index_;
         popup_dirty_ = true;
       }
       return true;
     case KEY_DC:
-      if (backend_->popup_is_editable(*entry)) {
-        popup_buffer_.clear();
+      if (popup_cursor_index_ < popup_buffer_.size() && backend_->popup_is_editable(*entry)) {
+        popup_buffer_.erase(popup_cursor_index_, 1);
         popup_dirty_ = true;
       }
+      return true;
+    case KEY_LEFT:
+      if (popup_cursor_index_ > 0) {
+        --popup_cursor_index_;
+      }
+      return true;
+    case KEY_RIGHT:
+      if (popup_cursor_index_ < popup_buffer_.size()) {
+        ++popup_cursor_index_;
+      }
+      return true;
+    case KEY_HOME:
+      popup_cursor_index_ = 0;
+      return true;
+    case KEY_END:
+      popup_cursor_index_ = popup_buffer_.size();
       return true;
     case ' ':
       if (!backend_->popup_is_editable(*entry)) {
@@ -261,14 +278,17 @@ bool ParameterCommanderScreen::handle_popup_key(int key) {
       }
       if (entry->descriptor.type == ParameterType::PARAMETER_BOOL) {
         backend_->toggle_bool_buffer(popup_buffer_);
+        popup_cursor_index_ = popup_buffer_.size();
       } else {
-        popup_buffer_.push_back(' ');
+        popup_buffer_.insert(popup_cursor_index_, 1, ' ');
+        ++popup_cursor_index_;
       }
       popup_dirty_ = true;
       return true;
     default:
       if (key >= 32 && key <= 126 && backend_->popup_is_editable(*entry)) {
-        popup_buffer_.push_back(static_cast<char>(key));
+        popup_buffer_.insert(popup_cursor_index_, 1, static_cast<char>(key));
+        ++popup_cursor_index_;
         popup_dirty_ = true;
       }
       return true;
@@ -373,6 +393,7 @@ void ParameterCommanderScreen::open_popup() {
   }
   popup_open_ = true;
   popup_buffer_ = entry->edit_buffer;
+  popup_cursor_index_ = popup_buffer_.size();
   popup_dirty_ = entry->dirty;
   curs_set(0);
 }
@@ -380,6 +401,7 @@ void ParameterCommanderScreen::open_popup() {
 void ParameterCommanderScreen::close_popup() {
   popup_open_ = false;
   popup_buffer_.clear();
+  popup_cursor_index_ = 0;
   popup_dirty_ = false;
   curs_set(0);
 }
@@ -569,13 +591,13 @@ void ParameterCommanderScreen::draw_popup(int rows, int columns) {
   }
 
   const int popup_width = std::min(columns - 4, 80);
-  const int popup_height = std::min(rows - 4, 13);
+  const int popup_height = std::min(rows - 4, 14);
   const int top = std::max(1, (rows - popup_height) / 2);
   const int left = std::max(2, (columns - popup_width) / 2);
   const int bottom = top + popup_height - 1;
   const int right = left + popup_width - 1;
   const int inner_width = popup_width - 2;
-  const int field_top = top + 7;
+  const int field_top = top + 8;
   const int field_left = left + 2;
   const int field_right = right - 2;
   const int field_inner_width = std::max(1, field_right - field_left - 1);
@@ -633,17 +655,25 @@ void ParameterCommanderScreen::draw_popup(int rows, int columns) {
       + "  [" + backend_->parameter_min(*entry) + "]"
       + "  [" + backend_->parameter_max(*entry) + "]");
   draw_popup_field(top + 4, "current", backend_->summary_value(*entry));
-  draw_text_hline(top + 5, left + 1, inner_width);
+  if (is_array_type(entry->descriptor.type)) {
+    draw_popup_field(top + 5, "syntax", "Use [item, item]; quote strings containing commas.");
+  }
+  draw_text_hline(top + 6, left + 1, inner_width);
   attroff(COLOR_PAIR(kColorPopup));
   draw_box(field_top, field_left, field_top + 2, field_right, kColorFrame);
   attron(theme_attr(kColorHeader));
   mvhline(field_top + 1, field_left + 1, ' ', field_inner_width);
-  const std::string visible_buffer = tail_fit(popup_buffer_, edit_text_width);
+  popup_cursor_index_ = std::min(popup_cursor_index_, popup_buffer_.size());
+  const int cursor_column = static_cast<int>(popup_cursor_index_);
+  const int visible_start = std::max(0, cursor_column - edit_text_width);
+  const std::string visible_buffer =
+    popup_buffer_.substr(
+      static_cast<std::size_t>(visible_start),
+      static_cast<std::size_t>(edit_text_width));
   mvaddnstr(field_top + 1, field_left + 1, visible_buffer.c_str(), edit_text_width);
   attroff(theme_attr(kColorHeader));
   if (backend_->popup_is_editable(*entry) && software_caret_visible()) {
-    const int visible_buffer_width = std::min(edit_text_width, static_cast<int>(visible_buffer.size()));
-    const int cursor_x = std::min(field_left + field_inner_width - 1, field_left + 1 + visible_buffer_width);
+    const int cursor_x = field_left + 1 + std::clamp(cursor_column - visible_start, 0, edit_text_width);
     attron(COLOR_PAIR(kColorCursor) | A_BOLD);
     mvaddch(field_top + 1, cursor_x, ' ');
     attroff(COLOR_PAIR(kColorCursor) | A_BOLD);

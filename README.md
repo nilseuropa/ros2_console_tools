@@ -30,7 +30,7 @@ ros2 run ros2_console_tools systemd_commander
 | Binary | Purpose | Highlights |
 | --- | --- | --- |
 | `node_commander` | Browse the live ROS 2 graph. | Node list, graph interface details, parameter service reachability, launcher hub for other ROS tools. |
-| `parameter_commander` | Inspect and edit parameters on a selected node. | Namespace-folded parameter tree, scalar editing, descriptor and constraint display. |
+| `parameter_commander` | Inspect and edit parameters on a selected node. | Namespace-folded parameter tree, scalar and array editing, descriptor and constraint display. |
 | `topic_monitor` | Inspect topics and monitor live traffic. | Rate and bandwidth stats, decoded message view, topic search, embedded `map_viewer` and `image_viewer` launch for compatible topics. |
 | `service_commander` | Inspect and call ROS 2 services. | Generic introspection-based request/response view, scalar request editing, interactive calls. |
 | `action_commander` | Inspect ROS 2 actions. | Protocol endpoint breakdown, server/client node lists, action graph visibility. |

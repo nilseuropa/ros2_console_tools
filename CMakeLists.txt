@@ -440,6 +440,20 @@ if(BUILD_TESTING)
     )
   endif()
 
+  ament_add_gtest(parameter_commander_backend_test
+    test/parameter_commander_backend_test.cpp
+  )
+  if(TARGET parameter_commander_backend_test)
+    ament_target_dependencies(parameter_commander_backend_test
+      ament_index_cpp
+      rclcpp
+    )
+    target_include_directories(parameter_commander_backend_test PRIVATE ${CURSES_INCLUDE_DIR} include)
+    target_link_libraries(parameter_commander_backend_test
+      parameter_commander_lib
+    )
+  endif()
+
   ament_add_gtest(image_viewer_backend_test
     test/image_viewer_backend_test.cpp
   )

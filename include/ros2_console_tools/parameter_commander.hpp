@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <future>
 #include <map>
 #include <memory>
@@ -85,6 +86,33 @@ inline std::string parameter_type_name(uint8_t type) {
 }
 
 inline std::string parameter_value_to_string(const rclcpp::ParameterValue & value) {
+  auto escape_string = [](const std::string & input) {
+      std::string output;
+      output.reserve(input.size() + 2);
+      output.push_back('"');
+      for (const char character : input) {
+        if (character == '\\' || character == '"') {
+          output.push_back('\\');
+        }
+        output.push_back(character);
+      }
+      output.push_back('"');
+      return output;
+    };
+
+  auto join_array = [](const auto & values, auto formatter) {
+      std::ostringstream stream;
+      stream << "[";
+      for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+          stream << ", ";
+        }
+        stream << formatter(values[index]);
+      }
+      stream << "]";
+      return stream.str();
+    };
+
   switch (value.get_type()) {
     case rclcpp::ParameterType::PARAMETER_BOOL:
       return value.get<bool>() ? "true" : "false";
@@ -98,11 +126,29 @@ inline std::string parameter_value_to_string(const rclcpp::ParameterValue & valu
     case rclcpp::ParameterType::PARAMETER_STRING:
       return value.get<std::string>();
     case rclcpp::ParameterType::PARAMETER_BOOL_ARRAY:
+      return join_array(
+        value.get<std::vector<bool>>(),
+        [](bool item) { return item ? "true" : "false"; });
     case rclcpp::ParameterType::PARAMETER_INTEGER_ARRAY:
+      return join_array(
+        value.get<std::vector<int64_t>>(),
+        [](int64_t item) { return std::to_string(item); });
     case rclcpp::ParameterType::PARAMETER_DOUBLE_ARRAY:
+      return join_array(
+        value.get<std::vector<double>>(),
+        [](double item) {
+          std::ostringstream stream;
+          stream << item;
+          return stream.str();
+        });
     case rclcpp::ParameterType::PARAMETER_STRING_ARRAY:
+      return join_array(
+        value.get<std::vector<std::string>>(),
+        escape_string);
     case rclcpp::ParameterType::PARAMETER_BYTE_ARRAY:
-      return "<array>";
+      return join_array(
+        value.get<std::vector<uint8_t>>(),
+        [](uint8_t item) { return std::to_string(static_cast<unsigned int>(item)); });
     case rclcpp::ParameterType::PARAMETER_NOT_SET:
     default:
       return "<unset>";
@@ -180,6 +226,14 @@ inline bool is_scalar_type(uint8_t type) {
     || type == ParameterType::PARAMETER_STRING;
 }
 
+inline bool is_array_type(uint8_t type) {
+  return type == ParameterType::PARAMETER_BOOL_ARRAY
+    || type == ParameterType::PARAMETER_INTEGER_ARRAY
+    || type == ParameterType::PARAMETER_DOUBLE_ARRAY
+    || type == ParameterType::PARAMETER_STRING_ARRAY
+    || type == ParameterType::PARAMETER_BYTE_ARRAY;
+}
+
 inline bool software_caret_visible() {
   const auto now = std::chrono::steady_clock::now().time_since_epoch();
   const auto phase = std::chrono::duration_cast<std::chrono::milliseconds>(now).count() / 500;
@@ -232,6 +286,7 @@ private:
   std::string fully_qualified_node_name(const std::string & ns, const std::string & name) const;
   void toggle_bool_buffer(std::string & buffer);
   bool wait_for_parameter_service();
+  std::vector<std::string> parse_array_tokens(const std::string & buffer);
 
   template<typename FutureT>
   bool wait_for_future(FutureT & future, const std::string & action) {
@@ -308,6 +363,7 @@ private:
   bool popup_dirty_{false};
   tui::SearchState search_state_;
   std::string popup_buffer_;
+  std::size_t popup_cursor_index_{0};
   tui::TerminalPane terminal_pane_;
 };
 

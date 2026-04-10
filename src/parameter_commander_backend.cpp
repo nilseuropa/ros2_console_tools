@@ -1,7 +1,9 @@
 #include "ros2_console_tools/parameter_commander.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 
@@ -143,8 +145,8 @@ void ParameterCommanderBackend::save_selected() {
     set_status("Parameter is read-only.");
     return;
   }
-  if (!is_scalar_type(entry->descriptor.type)) {
-    set_status("Only scalar parameters are editable in this version.");
+  if (!is_scalar_type(entry->descriptor.type) && !is_array_type(entry->descriptor.type)) {
+    set_status("This parameter type is not editable.");
     return;
   }
   if (!wait_for_parameter_service()) {
@@ -182,6 +184,24 @@ void ParameterCommanderBackend::save_selected() {
 
 std::optional<rclcpp::Parameter> ParameterCommanderBackend::parse_edit_buffer(const ParameterEntry & entry) {
   const std::string trimmed = trim(entry.edit_buffer);
+  auto parse_int64 = [](const std::string & token) {
+      std::size_t parsed_chars = 0;
+      const std::string value = trim(token);
+      const auto parsed = static_cast<int64_t>(std::stoll(value, &parsed_chars));
+      if (parsed_chars != value.size()) {
+        throw std::invalid_argument("trailing characters");
+      }
+      return parsed;
+    };
+  auto parse_double = [](const std::string & token) {
+      std::size_t parsed_chars = 0;
+      const std::string value = trim(token);
+      const double parsed = std::stod(value, &parsed_chars);
+      if (parsed_chars != value.size()) {
+        throw std::invalid_argument("trailing characters");
+      }
+      return parsed;
+    };
 
   try {
     switch (entry.descriptor.type) {
@@ -197,11 +217,54 @@ std::optional<rclcpp::Parameter> ParameterCommanderBackend::parse_edit_buffer(co
         return std::nullopt;
       }
       case ParameterType::PARAMETER_INTEGER:
-        return rclcpp::Parameter(entry.name, static_cast<int64_t>(std::stoll(trimmed)));
+        return rclcpp::Parameter(entry.name, parse_int64(trimmed));
       case ParameterType::PARAMETER_DOUBLE:
-        return rclcpp::Parameter(entry.name, std::stod(trimmed));
+        return rclcpp::Parameter(entry.name, parse_double(trimmed));
       case ParameterType::PARAMETER_STRING:
         return rclcpp::Parameter(entry.name, entry.edit_buffer);
+      case ParameterType::PARAMETER_BOOL_ARRAY: {
+        std::vector<bool> values;
+        for (const auto & token : parse_array_tokens(entry.edit_buffer)) {
+          const std::string lowered = lowercase(trim(token));
+          if (lowered == "true" || lowered == "1" || lowered == "yes" || lowered == "on") {
+            values.push_back(true);
+          } else if (lowered == "false" || lowered == "0" || lowered == "no" || lowered == "off") {
+            values.push_back(false);
+          } else {
+            set_status("Invalid bool array item. Use true/false.");
+            return std::nullopt;
+          }
+        }
+        return rclcpp::Parameter(entry.name, values);
+      }
+      case ParameterType::PARAMETER_INTEGER_ARRAY: {
+        std::vector<int64_t> values;
+        for (const auto & token : parse_array_tokens(entry.edit_buffer)) {
+          values.push_back(parse_int64(token));
+        }
+        return rclcpp::Parameter(entry.name, values);
+      }
+      case ParameterType::PARAMETER_DOUBLE_ARRAY: {
+        std::vector<double> values;
+        for (const auto & token : parse_array_tokens(entry.edit_buffer)) {
+          values.push_back(parse_double(token));
+        }
+        return rclcpp::Parameter(entry.name, values);
+      }
+      case ParameterType::PARAMETER_STRING_ARRAY:
+        return rclcpp::Parameter(entry.name, parse_array_tokens(entry.edit_buffer));
+      case ParameterType::PARAMETER_BYTE_ARRAY: {
+        std::vector<uint8_t> values;
+        for (const auto & token : parse_array_tokens(entry.edit_buffer)) {
+          const int64_t parsed = parse_int64(token);
+          if (parsed < 0 || parsed > 255) {
+            set_status("Invalid byte array item. Use values from 0 to 255.");
+            return std::nullopt;
+          }
+          values.push_back(static_cast<uint8_t>(parsed));
+        }
+        return rclcpp::Parameter(entry.name, values);
+      }
       default:
         set_status("Unsupported parameter type for editing.");
         return std::nullopt;
@@ -342,6 +405,93 @@ bool ParameterCommanderBackend::wait_for_parameter_service() {
     return false;
   }
   return true;
+}
+
+std::vector<std::string> ParameterCommanderBackend::parse_array_tokens(const std::string & buffer) {
+  std::string text = trim(buffer);
+  if (text.empty()) {
+    return {};
+  }
+  if (text.front() == '[') {
+    if (text.back() != ']') {
+      set_status("Invalid array. Missing closing ].");
+      throw std::invalid_argument("missing closing array bracket");
+    }
+    text = trim(text.substr(1, text.size() - 2));
+  }
+  if (text.empty()) {
+    return {};
+  }
+
+  std::vector<std::string> tokens;
+  std::string current;
+  bool in_quote = false;
+  char quote_char = '\0';
+  bool token_was_quoted = false;
+  bool quote_closed = false;
+  bool escape = false;
+
+  auto finish_token = [&]() {
+      tokens.push_back(token_was_quoted ? current : trim(current));
+      current.clear();
+      token_was_quoted = false;
+      quote_closed = false;
+    };
+
+  for (char character : text) {
+    if (quote_closed) {
+      if (std::isspace(static_cast<unsigned char>(character))) {
+        continue;
+      }
+      if (character == ',') {
+        finish_token();
+        continue;
+      }
+      set_status("Invalid array. Unexpected text after quoted item.");
+      throw std::invalid_argument("text after quoted array item");
+    }
+    if (escape) {
+      current.push_back(character);
+      escape = false;
+      continue;
+    }
+    if (in_quote) {
+      if (character == '\\') {
+        escape = true;
+        continue;
+      }
+      if (character == quote_char) {
+        in_quote = false;
+        token_was_quoted = true;
+        quote_closed = true;
+        continue;
+      }
+      current.push_back(character);
+      continue;
+    }
+    if (character == '\'' || character == '"') {
+      if (!trim(current).empty()) {
+        set_status("Invalid array. Quote must start an item.");
+        throw std::invalid_argument("quote inside unquoted array item");
+      }
+      current.clear();
+      in_quote = true;
+      quote_char = character;
+      continue;
+    }
+    if (character == ',') {
+      finish_token();
+      continue;
+    }
+    current.push_back(character);
+  }
+
+  if (escape || in_quote) {
+    set_status("Invalid array. Unterminated quoted item.");
+    throw std::invalid_argument("unterminated quoted array item");
+  }
+  finish_token();
+  return tokens;
 }
 
 void ParameterCommanderBackend::sync_edit_buffer_from_selected() {
@@ -585,7 +735,8 @@ std::string ParameterCommanderBackend::parameter_max(const ParameterEntry & entr
 }
 
 bool ParameterCommanderBackend::popup_is_editable(const ParameterEntry & entry) const {
-  return is_scalar_type(entry.descriptor.type) && !entry.descriptor.read_only;
+  return (is_scalar_type(entry.descriptor.type) || is_array_type(entry.descriptor.type))
+    && !entry.descriptor.read_only;
 }
 
 void ParameterCommanderBackend::set_status(const std::string & message) {
