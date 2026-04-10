@@ -31,7 +31,7 @@ ros2 run ros2_console_tools systemd_commander
 | --- | --- | --- |
 | `node_commander` | Browse the live ROS 2 graph. | Node list, graph interface details, parameter service reachability, launcher hub for other ROS tools. |
 | `parameter_commander` | Inspect and edit parameters on a selected node. | Namespace-folded parameter tree, scalar and array editing, descriptor and constraint display. |
-| `topic_monitor` | Inspect topics and monitor live traffic. | Rate and bandwidth stats, decoded message view, topic search, embedded `map_viewer` and `image_viewer` launch for compatible topics. |
+| `topic_monitor` | Inspect topics and monitor live traffic. | Rate and bandwidth stats, decoded message view, topic search, embedded `map_viewer`, `image_viewer`, and `joy_viewer` launch for compatible topics. |
 | `service_commander` | Inspect and call ROS 2 services. | Generic introspection-based request/response view, scalar request editing, interactive calls. |
 | `action_commander` | Inspect ROS 2 actions. | Protocol endpoint breakdown, server/client node lists, action graph visibility. |
 | `log_viewer` | Read `/rosout` in the terminal. | Source filtering, severity filtering, text filter, detail popup, local source-code inspection when paths are available. |
@@ -45,6 +45,7 @@ ros2 run ros2_console_tools systemd_commander
 | --- | --- | --- |
 | `map_viewer` | Render `nav_msgs/msg/OccupancyGrid` in the terminal. | Rotated map rendering, costmap-style blocks, legend and monochrome controls. |
 | `image_viewer` | Render `sensor_msgs/msg/Image` in the terminal. | Grayscale image view, zoom, pan, invert, render mode switching, frame freeze. |
+| `joy_viewer` | Visualize `sensor_msgs/msg/Joy` in the terminal. | Axis bars, button states, generic stick pads, frame freeze. |
 
 ### Host-side tools
 
