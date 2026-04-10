@@ -2,7 +2,7 @@
 
 `ros2_console_tools` is a terminal-first toolbox for ROS 2 runtime inspection, visualization, and operator workflows, plus a small set of host-side tools for `systemd` service management and `journalctl` log reading.
 
-Current package release: `1.5.2`.
+Current package release: `1.5.3`.
 
 ![Node Commander demo](doc/ros2_console_tools_demo.gif)
 
