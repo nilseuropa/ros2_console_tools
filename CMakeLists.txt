@@ -100,6 +100,33 @@ install(TARGETS joy_viewer_lib joy_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_library(imu_viewer_lib
+  src/imu_viewer_backend.cpp
+  src/imu_viewer_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(imu_viewer_lib
+  ament_index_cpp
+  geometry_msgs
+  rclcpp
+  sensor_msgs
+)
+target_include_directories(imu_viewer_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(imu_viewer_lib ${NCURSESW_LIBRARY})
+
+add_executable(imu_viewer src/imu_viewer.cpp)
+ament_target_dependencies(imu_viewer
+  geometry_msgs
+  rclcpp
+  sensor_msgs
+)
+target_include_directories(imu_viewer PRIVATE ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(imu_viewer imu_viewer_lib)
+
+install(TARGETS imu_viewer_lib imu_viewer
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 add_library(parameter_commander_lib
   src/parameter_commander_backend.cpp
   src/parameter_commander_screen.cpp
@@ -135,7 +162,7 @@ ament_target_dependencies(topic_monitor_lib
   rosidl_typesupport_introspection_cpp
 )
 target_include_directories(topic_monitor_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
-target_link_libraries(topic_monitor_lib ${NCURSESW_LIBRARY} map_viewer_lib image_viewer_lib joy_viewer_lib)
+target_link_libraries(topic_monitor_lib ${NCURSESW_LIBRARY} map_viewer_lib image_viewer_lib joy_viewer_lib imu_viewer_lib)
 
 add_executable(topic_monitor src/topic_monitor.cpp)
 ament_target_dependencies(topic_monitor
@@ -400,6 +427,7 @@ target_link_libraries(
   parameter_commander_lib
   topic_monitor_lib
   joy_viewer_lib
+  imu_viewer_lib
   log_viewer_lib
   diagnostics_viewer_lib
   service_commander_lib
