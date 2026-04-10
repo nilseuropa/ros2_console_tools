@@ -1,6 +1,7 @@
 #include "ros2_console_tools/topic_monitor.hpp"
 
 #include "ros2_console_tools/image_viewer.hpp"
+#include "ros2_console_tools/imu_viewer.hpp"
 #include "ros2_console_tools/joy_viewer.hpp"
 #include "ros2_console_tools/map_viewer.hpp"
 
@@ -342,6 +343,13 @@ bool TopicMonitorScreen::launch_selected_visualizer() {
     flushinp();
     (void)run_joy_viewer_tool(topic_name, true);
     backend_->status_line_ = "Returned from joy_viewer for " + topic_name + ".";
+    return true;
+  }
+
+  if (topic_type == "sensor_msgs/msg/Imu") {
+    flushinp();
+    (void)run_imu_viewer_tool(topic_name, true);
+    backend_->status_line_ = "Returned from imu_viewer for " + topic_name + ".";
     return true;
   }
 
