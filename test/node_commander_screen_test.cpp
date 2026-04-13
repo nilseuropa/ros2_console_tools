@@ -42,6 +42,7 @@ TEST_F(NodeCommanderScreenTest, HeaderActionsExposeNodeScopedToolsAndCollapseHid
 
   auto backend = std::make_shared<NodeCommanderBackend>();
   NodeCommanderScreen screen(backend);
+  EXPECT_EQ(screen.help_popup_title_, std::string("Node Commander v") + ROS2_CONSOLE_TOOLS_PACKAGE_VERSION);
 
   rclcpp::executors::SingleThreadedExecutor target_executor;
   rclcpp::executors::SingleThreadedExecutor backend_executor;

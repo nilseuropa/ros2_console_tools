@@ -21,6 +21,10 @@
 #include <utility>
 #include <vector>
 
+#ifndef ROS2_CONSOLE_TOOLS_PACKAGE_VERSION
+#define ROS2_CONSOLE_TOOLS_PACKAGE_VERSION "unknown"
+#endif
+
 namespace ros2_console_tools {
 
 int run_parameter_commander_tool(const std::string & target_node, bool embedded_mode);
@@ -134,10 +138,21 @@ bool run_service_commander_subprocess(
   return false;
 }
 
+std::string make_help_popup_title() {
+  std::string title = "Node Commander";
+  const std::string version = ROS2_CONSOLE_TOOLS_PACKAGE_VERSION;
+  if (!version.empty() && version != "unknown") {
+    title += " v";
+    title += version;
+  }
+  return title;
+}
+
 }  // namespace
 
 NodeCommanderScreen::NodeCommanderScreen(std::shared_ptr<NodeCommanderBackend> backend)
-: backend_(std::move(backend)) {}
+: backend_(std::move(backend)),
+  help_popup_title_(make_help_popup_title()) {}
 
 int NodeCommanderScreen::run() {
   Session ncurses_session;
@@ -756,7 +771,8 @@ void NodeCommanderScreen::draw() {
     }
     draw_box(popup_top, popup_left, popup_bottom, popup_right, kColorFrame);
     attron(COLOR_PAIR(kColorHeader));
-    mvprintw(popup_top, popup_left + 2, "Node Commander Help ");
+    const std::string popup_title = help_popup_title_ + " ";
+    mvaddnstr(popup_top, popup_left + 2, popup_title.c_str(), std::max(0, popup_width - 4));
     attroff(COLOR_PAIR(kColorHeader));
 
     const int text_left = popup_left + 2;

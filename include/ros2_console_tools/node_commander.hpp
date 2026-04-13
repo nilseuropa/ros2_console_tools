@@ -111,6 +111,7 @@ private:
   void draw_help_line(int row, int columns) const;
 
   std::shared_ptr<NodeCommanderBackend> backend_;
+  std::string help_popup_title_;
   tui::SearchState search_state_;
   NodeCommanderFocusPane focus_pane_{NodeCommanderFocusPane::NodeList};
   int detail_selected_index_{0};

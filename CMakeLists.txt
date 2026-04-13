@@ -2,6 +2,17 @@ cmake_minimum_required(VERSION 3.10)
 
 project(ros2_console_tools)
 
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/package.xml" ROS2_CONSOLE_TOOLS_PACKAGE_XML)
+string(
+  REGEX MATCH
+  "<version>([^<]+)</version>"
+  ROS2_CONSOLE_TOOLS_PACKAGE_VERSION_MATCH
+  "${ROS2_CONSOLE_TOOLS_PACKAGE_XML}")
+if(NOT ROS2_CONSOLE_TOOLS_PACKAGE_VERSION_MATCH)
+  message(FATAL_ERROR "Failed to extract ros2_console_tools version from package.xml")
+endif()
+string(STRIP "${CMAKE_MATCH_1}" ROS2_CONSOLE_TOOLS_PACKAGE_VERSION)
+
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -238,6 +249,9 @@ add_library(node_commander_lib
   src/node_commander_backend.cpp
   src/node_commander_screen.cpp
   src/tui.cpp
+)
+target_compile_definitions(node_commander_lib
+  PUBLIC ROS2_CONSOLE_TOOLS_PACKAGE_VERSION=\"${ROS2_CONSOLE_TOOLS_PACKAGE_VERSION}\"
 )
 ament_target_dependencies(node_commander_lib
   ament_index_cpp
