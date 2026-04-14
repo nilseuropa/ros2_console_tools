@@ -139,6 +139,7 @@ private:
   int source_scroll_{0};
   int log_scroll_{0};
   int live_log_scroll_{0};
+  bool live_log_follow_newest_{true};
   bool hide_unselected_{false};
   uint8_t minimum_level_{LogMessage::INFO};
   std::string text_filter_;

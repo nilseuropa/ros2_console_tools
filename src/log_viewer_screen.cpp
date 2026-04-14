@@ -189,6 +189,7 @@ bool LogViewerScreen::handle_search_key(int key) {
     const int match = find_best_match(labels, search_state_.query, backend_->selected_live_log_index_);
     if (match >= 0) {
       backend_->selected_live_log_index_ = match;
+      backend_->live_log_follow_newest_ = match == 0;
     }
     backend_->set_status("Search: " + search_state_.query);
     return true;
@@ -235,6 +236,9 @@ bool LogViewerScreen::handle_filter_prompt_key(int key) {
       backend_->filter_buffer_.clear();
       backend_->selected_log_index_ = 0;
       backend_->log_scroll_ = 0;
+      backend_->selected_live_log_index_ = 0;
+      backend_->live_log_scroll_ = 0;
+      backend_->live_log_follow_newest_ = true;
       backend_->set_status(backend_->text_filter_.empty() ? "Text filter cleared." : "Text filter applied.");
       return true;
     case KEY_BACKSPACE:
@@ -320,15 +324,18 @@ bool LogViewerScreen::handle_live_source_key(int key) {
       if (backend_->selected_live_log_index_ > 0) {
         --backend_->selected_live_log_index_;
       }
+      backend_->live_log_follow_newest_ = backend_->selected_live_log_index_ == 0;
       return true;
     case KEY_DOWN:
     case 'j':
       if (backend_->selected_live_log_index_ + 1 < static_cast<int>(snapshot.size())) {
         ++backend_->selected_live_log_index_;
       }
+      backend_->live_log_follow_newest_ = backend_->selected_live_log_index_ == 0;
       return true;
     case KEY_PPAGE:
       backend_->selected_live_log_index_ = std::max(0, backend_->selected_live_log_index_ - page_step());
+      backend_->live_log_follow_newest_ = backend_->selected_live_log_index_ == 0;
       return true;
     case KEY_NPAGE:
       if (!snapshot.empty()) {
@@ -336,6 +343,7 @@ bool LogViewerScreen::handle_live_source_key(int key) {
           static_cast<int>(snapshot.size()) - 1,
           backend_->selected_live_log_index_ + page_step());
       }
+      backend_->live_log_follow_newest_ = backend_->selected_live_log_index_ == 0;
       return true;
     case '\n':
     case KEY_ENTER:
@@ -758,6 +766,10 @@ void LogViewerScreen::draw_logs_pane(int top, int left, int bottom, int right) {
 void LogViewerScreen::draw_live_source_pane(int top, int left, int bottom, int right) {
   const auto snapshot = backend_->live_source_logs_snapshot();
   backend_->clamp_live_log_selection(snapshot);
+  if (backend_->live_log_follow_newest_ && !snapshot.empty()) {
+    backend_->selected_live_log_index_ = 0;
+    backend_->live_log_scroll_ = 0;
+  }
 
   const int width = right - left + 1;
   const int visible_rows = std::max(1, bottom - top + 1);

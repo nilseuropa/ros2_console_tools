@@ -46,6 +46,9 @@ void LogViewerBackend::cycle_minimum_level() {
   }
   selected_log_index_ = 0;
   log_scroll_ = 0;
+  selected_live_log_index_ = 0;
+  live_log_scroll_ = 0;
+  live_log_follow_newest_ = true;
   set_status("Minimum level: " + level_string(minimum_level_) + ".");
 }
 
@@ -205,6 +208,7 @@ void LogViewerBackend::open_live_source() {
   view_mode_ = LogViewerViewMode::SourceLive;
   live_log_scroll_ = 0;
   selected_live_log_index_ = 0;
+  live_log_follow_newest_ = true;
   set_status("Live view: " + live_source_name_ + ".");
 }
 
@@ -213,6 +217,7 @@ void LogViewerBackend::close_live_source() {
   live_source_name_.clear();
   live_log_scroll_ = 0;
   selected_live_log_index_ = 0;
+  live_log_follow_newest_ = true;
   set_status("Returned to split view.");
 }
 
