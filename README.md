@@ -1,6 +1,6 @@
 # ros2_console_tools
 
-`ros2_console_tools` is a terminal-first toolbox for ROS 2 runtime inspection, visualization, and operator workflows, plus a small set of host-side tools for `systemd` service management and `journalctl` log reading.
+`ros2_console_tools` is a terminal-first toolbox for ROS 2 runtime inspection, visualization, and operator workflows.
 
 Current package release: `1.5.3`.
 
@@ -20,7 +20,6 @@ Launch a tool:
 ```bash
 ros2 run ros2_console_tools node_commander
 ros2 run ros2_console_tools topic_monitor
-ros2 run ros2_console_tools systemd_commander
 ```
 
 ## Toolset
@@ -47,13 +46,6 @@ ros2 run ros2_console_tools systemd_commander
 | `image_viewer` | Render `sensor_msgs/msg/Image` in the terminal. | Grayscale image view, zoom, pan, invert, render mode switching, frame freeze. |
 | `joy_viewer` | Visualize `sensor_msgs/msg/Joy` in the terminal. | Axis bars, button states, generic stick pads, frame freeze. |
 | `imu_viewer` | Visualize `sensor_msgs/msg/Imu` in the terminal. | Angular velocity and acceleration bars, orientation readout, orientation-derived tilt, covariance state. |
-
-### Host-side tools
-
-| Binary | Purpose | Highlights |
-| --- | --- | --- |
-| `systemd_commander` | Manage `systemd` service units from the same ncurses UI style. | Service list, detail popup, start/stop/restart/reload actions, in-app unit file editor with syntax highlighting, `F9` jump into logs. |
-| `journal_viewer` | Read system journal entries with the same interaction model. | Live mode with newest entries on top, full snapshot mode, priority filter, text filter, detail popup. |
 
 ## Common Interaction Model
 
@@ -92,21 +84,14 @@ That shared layer provides:
 - incremental search helpers
 - an embedded PTY-backed terminal pane
 
-There are now two backend styles in the repository:
-
-- ROS-backed tools use `rclcpp::Node` backends for subscriptions, clients, graph queries, and cached runtime state.
-- Host-side tools use plain backend/client classes. `systemd_commander` and `journal_viewer` are built around [include/ros2_console_tools/process_runner.hpp](include/ros2_console_tools/process_runner.hpp), [include/ros2_console_tools/systemd_client.hpp](include/ros2_console_tools/systemd_client.hpp), and [include/ros2_console_tools/journal_client.hpp](include/ros2_console_tools/journal_client.hpp).
+ROS-backed tools use `rclcpp::Node` backends for subscriptions, clients, graph queries, and cached runtime state.
 
 ## Notable Integration Points
 
 - `node_commander` is the main ROS entry point and launcher hub.
 - `topic_monitor` can open `map_viewer` for occupancy grids, `image_viewer` for image topics, and `joy_viewer` for joystick topics.
-- `systemd_commander` opens `journal_viewer` for the selected unit on `F9`.
-- `systemd_commander` keeps the main TUI unprivileged and only authenticates on demand for actions that require elevated privileges.
 
 ## Notes
 
-- `systemd_commander` and `journal_viewer` rely on local `systemctl` and `journalctl` availability.
-- Privileged host operations authenticate on demand instead of running the whole application as `root`.
 - `service_commander` is currently strongest for scalar request editing; richer structured editing still needs dedicated UI work.
 - `action_commander` is currently inspection-focused and does not yet provide full interactive goal execution.
