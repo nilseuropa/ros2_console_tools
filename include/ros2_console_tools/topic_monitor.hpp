@@ -176,10 +176,17 @@ struct TopicEntry {
   std::string monitor_error;
   bool has_last_message{false};
   TopicClock::time_point last_message_time{};
+  bool has_last_observed_timestamp{false};
+  std::int64_t last_observed_timestamp_ns{0};
   std::deque<Sample> samples;
   std::deque<IntervalSample> intervals;
   std::size_t sample_bytes_sum{0};
   std::size_t total_missed_messages{0};
+  std::size_t counted_current_gap_missed_messages{0};
+  bool current_gap_visible_active{false};
+  TopicClock::time_point next_gap_count_time{};
+  double current_gap_average_period_seconds{0.0};
+  double last_recovery_duration_seconds{0.0};
   double recovery_duration_sum_seconds{0.0};
   std::size_t recovery_count{0};
   std::vector<DetailRow> detail_rows;
@@ -195,6 +202,7 @@ struct TopicRow {
   std::string avg_hz;
   std::string min_max_hz;
   std::string bandwidth;
+  std::string last_recovery_time;
   std::string avg_recovery_time;
   bool has_expected_frequency{false};
   std::size_t current_missed_messages{0};
@@ -225,12 +233,13 @@ private:
 
   static constexpr auto kWindowDuration = std::chrono::seconds(5);
   static constexpr auto kStaleAfter = std::chrono::milliseconds(1500);
+  static constexpr double kMissGraceFraction = 0.25;
 
   void refresh_topics();
   void apply_startup_behavior();
   void warm_up_topic_list();
   void maybe_refresh_topics();
-  std::vector<TopicRow> topic_rows_snapshot() const;
+  std::vector<TopicRow> topic_rows_snapshot();
   std::vector<DetailRow> detail_rows_snapshot(const std::string & topic_name) const;
   std::vector<DetailRow> visible_detail_rows_snapshot(const std::string & topic_name) const;
   std::vector<PlotSample> plot_samples_snapshot(
@@ -238,7 +247,9 @@ private:
   std::string detail_error_snapshot(const std::string & topic_name) const;
   static std::optional<double> average_period_seconds(const TopicEntry & entry);
   static std::size_t missed_messages_for_gap(double seconds_since_last, double average_period);
-  static void compute_stats(const TopicEntry & entry, TopicClock::time_point now, TopicRow & row);
+  static void advance_visible_gap_counts(TopicEntry & entry, TopicClock::time_point now);
+  void update_active_gap_counters();
+  static void compute_stats(TopicEntry & entry, TopicClock::time_point now, TopicRow & row);
   void toggle_selected_topic_monitoring();
   void open_selected_topic_detail();
   void close_topic_detail();
@@ -247,6 +258,12 @@ private:
   void start_monitoring(const TopicEntry & entry);
   void stop_monitoring(const std::string & topic_name);
   void on_message(const std::string & topic_name, const rclcpp::SerializedMessage & message);
+  void on_message(
+    const std::string & topic_name, const rclcpp::SerializedMessage & message,
+    const rclcpp::MessageInfo & message_info);
+  void on_message(
+    const std::string & topic_name, const rclcpp::SerializedMessage & message,
+    const rclcpp::MessageInfo * message_info);
   TopicIntrospection & get_or_create_introspection(const std::string & type);
   std::vector<DetailRow> decode_detail_rows(
     const std::string & type, const rclcpp::SerializedMessage & message);
@@ -266,7 +283,7 @@ private:
   std::string topic_namespace(const std::string & topic_name) const;
   std::string topic_leaf_name(const std::string & topic_name) const;
   bool is_topic_namespace_expanded(const std::string & namespace_path) const;
-  std::vector<TopicListItem> visible_topic_items() const;
+  std::vector<TopicListItem> visible_topic_items();
   void expand_selected_namespace();
   void collapse_selected_namespace();
   void clamp_detail_selection(const std::vector<DetailRow> & rows);
@@ -301,6 +318,7 @@ private:
   std::string detail_topic_name_;
   std::string status_line_{"Loading topics..."};
   TopicClock::time_point last_refresh_time_{};
+  rclcpp::TimerBase::SharedPtr gap_counter_timer_;
 };
 
 class TopicMonitorScreen {

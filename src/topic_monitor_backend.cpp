@@ -1,8 +1,32 @@
 #include "ros2_console_tools/topic_monitor.hpp"
 
 #include <cmath>
+#include <limits>
 
 namespace ros2_console_tools {
+
+namespace {
+
+std::optional<std::int64_t> observed_timestamp_ns(const rclcpp::MessageInfo * message_info) {
+  if (message_info == nullptr) {
+    return std::nullopt;
+  }
+
+  const auto & rmw_info = message_info->get_rmw_message_info();
+  if (rmw_info.received_timestamp > 0) {
+    return static_cast<std::int64_t>(rmw_info.received_timestamp);
+  }
+  if (rmw_info.source_timestamp > 0) {
+    return static_cast<std::int64_t>(rmw_info.source_timestamp);
+  }
+  return std::nullopt;
+}
+
+TopicClock::duration gap_period_duration(double seconds) {
+  return std::chrono::duration_cast<TopicClock::duration>(std::chrono::duration<double>(seconds));
+}
+
+}  // namespace
 
 TopicMonitorBackend::TopicMonitorBackend(const TopicMonitorLaunchOptions & options)
 : Node("topic_monitor"),
@@ -21,6 +45,12 @@ TopicMonitorBackend::TopicMonitorBackend(const TopicMonitorLaunchOptions & optio
       RCLCPP_WARN(this->get_logger(), "%s", theme_error.c_str());
     }
   }
+
+  gap_counter_timer_ = this->create_wall_timer(
+    std::chrono::milliseconds(10),
+    [this]() {
+      update_active_gap_counters();
+    });
 }
 
 void TopicMonitorBackend::refresh_topics() {
@@ -181,13 +211,13 @@ void TopicMonitorBackend::maybe_refresh_topics() {
   }
 }
 
-std::vector<TopicRow> TopicMonitorBackend::topic_rows_snapshot() const {
+std::vector<TopicRow> TopicMonitorBackend::topic_rows_snapshot() {
   std::lock_guard<std::mutex> lock(mutex_);
   std::vector<TopicRow> rows;
   rows.reserve(topics_.size());
   const auto now = TopicClock::now();
 
-  for (const auto & [name, entry] : topics_) {
+  for (auto & [name, entry] : topics_) {
     TopicRow row;
     row.name = name;
     row.type = entry.type;
@@ -196,6 +226,7 @@ std::vector<TopicRow> TopicMonitorBackend::topic_rows_snapshot() const {
     row.avg_hz = "-";
     row.min_max_hz = "-";
     row.bandwidth = "-";
+    row.last_recovery_time = "-";
     row.avg_recovery_time = "-";
 
     if (entry.monitored) {
@@ -295,29 +326,66 @@ std::optional<double> TopicMonitorBackend::average_period_seconds(const TopicEnt
 std::size_t TopicMonitorBackend::missed_messages_for_gap(
   double seconds_since_last, double average_period)
 {
-  if (average_period <= 0.0 || seconds_since_last < average_period) {
+  if (average_period <= 0.0) {
     return 0;
   }
 
-  return static_cast<std::size_t>(std::floor((seconds_since_last / average_period) + 1e-9));
+  const double grace_threshold = average_period * (1.0 + kMissGraceFraction);
+  if (seconds_since_last < grace_threshold) {
+    return 0;
+  }
+
+  return static_cast<std::size_t>(
+    std::floor((seconds_since_last / average_period) - kMissGraceFraction + 1e-9));
+}
+
+void TopicMonitorBackend::advance_visible_gap_counts(TopicEntry & entry, TopicClock::time_point now) {
+  if (!entry.current_gap_visible_active || entry.current_gap_average_period_seconds <= 0.0) {
+    return;
+  }
+
+  const auto period = gap_period_duration(entry.current_gap_average_period_seconds);
+  if (period <= TopicClock::duration::zero()) {
+    return;
+  }
+
+  while (now >= entry.next_gap_count_time) {
+    ++entry.total_missed_messages;
+    ++entry.counted_current_gap_missed_messages;
+    entry.next_gap_count_time += period;
+  }
+}
+
+void TopicMonitorBackend::update_active_gap_counters() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto now = TopicClock::now();
+  for (auto & [_, entry] : topics_) {
+    advance_visible_gap_counts(entry, now);
+  }
 }
 
 void TopicMonitorBackend::compute_stats(
-  const TopicEntry & entry, TopicClock::time_point now, TopicRow & row)
+  TopicEntry & entry, TopicClock::time_point now, TopicRow & row)
 {
-  row.total_missed_messages = entry.total_missed_messages;
   if (entry.recovery_count > 0) {
     row.avg_recovery_time = format_duration(
       entry.recovery_duration_sum_seconds / static_cast<double>(entry.recovery_count));
   }
+  row.last_recovery_time = format_duration(entry.last_recovery_duration_seconds);
 
   if (const auto average_period = average_period_seconds(entry)) {
     const double average = 1.0 / *average_period;
-    double min_period = entry.intervals.front().seconds;
+    const double min_reasonable_period = *average_period * (1.0 - kMissGraceFraction);
+    double min_period = std::numeric_limits<double>::max();
     double max_period = entry.intervals.front().seconds;
     for (const auto & interval : entry.intervals) {
-      min_period = std::min(min_period, interval.seconds);
       max_period = std::max(max_period, interval.seconds);
+      if (interval.seconds >= min_reasonable_period) {
+        min_period = std::min(min_period, interval.seconds);
+      }
+    }
+    if (min_period == std::numeric_limits<double>::max()) {
+      min_period = entry.intervals.front().seconds;
     }
 
     row.avg_hz = format_hz(average);
@@ -326,9 +394,20 @@ void TopicMonitorBackend::compute_stats(
       const double seconds_since_last = std::chrono::duration<double>(now - entry.last_message_time).count();
       row.has_expected_frequency = true;
       row.current_missed_messages = missed_messages_for_gap(seconds_since_last, *average_period);
-      row.total_missed_messages += row.current_missed_messages;
+      if (row.current_missed_messages > 0) {
+        if (!entry.current_gap_visible_active) {
+          entry.current_gap_visible_active = true;
+          entry.current_gap_average_period_seconds = *average_period;
+          entry.counted_current_gap_missed_messages = 1;
+          entry.total_missed_messages += 1;
+          entry.next_gap_count_time = now + gap_period_duration(*average_period);
+        } else {
+          advance_visible_gap_counts(entry, now);
+        }
+      }
     }
   }
+  row.total_missed_messages = entry.total_missed_messages;
 
   if (entry.samples.size() >= 2) {
     const auto span = std::chrono::duration<double>(
@@ -488,8 +567,10 @@ void TopicMonitorBackend::start_monitoring(const TopicEntry & entry) {
       entry.name,
       entry.type,
       subscription_qos,
-      [this, topic_name = entry.name](std::shared_ptr<rclcpp::SerializedMessage> message) {
-        on_message(topic_name, *message);
+      [this, topic_name = entry.name](
+        std::shared_ptr<rclcpp::SerializedMessage> message, const rclcpp::MessageInfo & message_info)
+      {
+        on_message(topic_name, *message, message_info);
       });
 
     std::lock_guard<std::mutex> lock(mutex_);
@@ -520,7 +601,14 @@ void TopicMonitorBackend::stop_monitoring(const std::string & topic_name) {
     found->second.samples.clear();
     found->second.intervals.clear();
     found->second.sample_bytes_sum = 0;
+    found->second.has_last_observed_timestamp = false;
+    found->second.last_observed_timestamp_ns = 0;
     found->second.total_missed_messages = 0;
+    found->second.counted_current_gap_missed_messages = 0;
+    found->second.current_gap_visible_active = false;
+    found->second.next_gap_count_time = {};
+    found->second.current_gap_average_period_seconds = 0.0;
+    found->second.last_recovery_duration_seconds = 0.0;
     found->second.recovery_duration_sum_seconds = 0.0;
     found->second.recovery_count = 0;
     found->second.has_last_message = false;
@@ -540,8 +628,25 @@ void TopicMonitorBackend::stop_monitoring(const std::string & topic_name) {
 void TopicMonitorBackend::on_message(
   const std::string & topic_name, const rclcpp::SerializedMessage & message)
 {
+  on_message(topic_name, message, nullptr);
+}
+
+void TopicMonitorBackend::on_message(
+  const std::string & topic_name, const rclcpp::SerializedMessage & message,
+  const rclcpp::MessageInfo & message_info)
+{
+  on_message(topic_name, message, &message_info);
+}
+
+void TopicMonitorBackend::on_message(
+  const std::string & topic_name, const rclcpp::SerializedMessage & message,
+  const rclcpp::MessageInfo * message_info)
+{
+  const auto now = TopicClock::now();
+  const auto timestamp_ns = observed_timestamp_ns(message_info);
   std::vector<DetailRow> detail_rows;
   std::string detail_error;
+  bool should_decode_details = false;
   {
     TopicEntry snapshot;
     {
@@ -551,12 +656,16 @@ void TopicMonitorBackend::on_message(
         return;
       }
       snapshot = found->second;
+      should_decode_details =
+        (view_mode_ == TopicMonitorViewMode::TopicDetail && detail_topic_name_ == topic_name);
     }
 
-    try {
-      detail_rows = decode_detail_rows(snapshot.type, message);
-    } catch (const std::exception & exception) {
-      detail_error = exception.what();
+    if (should_decode_details) {
+      try {
+        detail_rows = decode_detail_rows(snapshot.type, message);
+      } catch (const std::exception & exception) {
+        detail_error = exception.what();
+      }
     }
   }
 
@@ -567,39 +676,61 @@ void TopicMonitorBackend::on_message(
   }
 
   auto & entry = found->second;
-  const auto now = TopicClock::now();
   const auto cutoff = now - kWindowDuration;
   const std::size_t bytes = message.size();
 
   if (entry.has_last_message) {
-    const double seconds = std::chrono::duration<double>(now - entry.last_message_time).count();
-    if (seconds > 0.0) {
-      if (const auto average_period = average_period_seconds(entry)) {
-        const auto missed_messages = missed_messages_for_gap(seconds, *average_period);
-        if (missed_messages > 0) {
-          entry.total_missed_messages += missed_messages;
-          entry.recovery_duration_sum_seconds += seconds;
+    const double wall_gap_seconds =
+      std::chrono::duration<double>(now - entry.last_message_time).count();
+    double interval_seconds = wall_gap_seconds;
+    if (
+      timestamp_ns.has_value() && entry.has_last_observed_timestamp &&
+      *timestamp_ns > entry.last_observed_timestamp_ns)
+    {
+      interval_seconds = static_cast<double>(*timestamp_ns - entry.last_observed_timestamp_ns) / 1e9;
+    }
+    if (wall_gap_seconds > 0.0) {
+      if (entry.current_gap_visible_active) {
+        if (entry.current_gap_average_period_seconds <= 0.0) {
+          if (const auto average_period = average_period_seconds(entry)) {
+            entry.current_gap_average_period_seconds = *average_period;
+          }
+        }
+        advance_visible_gap_counts(entry, now);
+        if (entry.counted_current_gap_missed_messages > 0 && entry.current_gap_average_period_seconds > 0.0) {
+          entry.last_recovery_duration_seconds = wall_gap_seconds;
+          entry.recovery_duration_sum_seconds += wall_gap_seconds;
           ++entry.recovery_count;
         }
       }
-      entry.intervals.push_back({now, seconds});
+      entry.current_gap_visible_active = false;
+      entry.counted_current_gap_missed_messages = 0;
+      entry.next_gap_count_time = {};
+      entry.current_gap_average_period_seconds = 0.0;
+      entry.intervals.push_back({now, interval_seconds});
     }
   }
 
   entry.has_last_message = true;
   entry.last_message_time = now;
+  if (timestamp_ns.has_value()) {
+    entry.has_last_observed_timestamp = true;
+    entry.last_observed_timestamp_ns = *timestamp_ns;
+  }
   entry.samples.push_back({now, bytes});
   entry.sample_bytes_sum += bytes;
-  entry.detail_rows = std::move(detail_rows);
-  entry.detail_error = std::move(detail_error);
-  for (const auto & row : entry.detail_rows) {
-    if (!row.numeric) {
-      continue;
-    }
-    auto & samples = entry.plot_samples[row.path];
-    samples.push_back({now, row.numeric_value});
-    while (!samples.empty() && samples.front().time < cutoff) {
-      samples.pop_front();
+  if (should_decode_details) {
+    entry.detail_rows = std::move(detail_rows);
+    entry.detail_error = std::move(detail_error);
+    for (const auto & row : entry.detail_rows) {
+      if (!row.numeric) {
+        continue;
+      }
+      auto & samples = entry.plot_samples[row.path];
+      samples.push_back({now, row.numeric_value});
+      while (!samples.empty() && samples.front().time < cutoff) {
+        samples.pop_front();
+      }
     }
   }
 
@@ -915,7 +1046,7 @@ bool TopicMonitorBackend::is_topic_namespace_expanded(const std::string & namesp
   return !found->second;
 }
 
-std::vector<TopicListItem> TopicMonitorBackend::visible_topic_items() const {
+std::vector<TopicListItem> TopicMonitorBackend::visible_topic_items() {
   const auto rows = topic_rows_snapshot();
   std::vector<TopicListItem> items;
   std::map<std::string, bool> emitted_namespaces;
