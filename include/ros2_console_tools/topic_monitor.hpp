@@ -90,6 +90,31 @@ inline std::string format_bandwidth(double bytes_per_second) {
   return stream.str();
 }
 
+inline std::string format_duration(double seconds) {
+  if (seconds <= 0.0) {
+    return "-";
+  }
+
+  std::ostringstream stream;
+  if (seconds >= 60.0) {
+    const auto minutes = static_cast<int>(seconds / 60.0);
+    const double remaining_seconds = seconds - (static_cast<double>(minutes) * 60.0);
+    stream << minutes << "m";
+    if (remaining_seconds >= 10.0) {
+      stream << std::fixed << std::setprecision(0) << remaining_seconds << "s";
+    } else {
+      stream << std::fixed << std::setprecision(1) << remaining_seconds << "s";
+    }
+  } else if (seconds >= 10.0) {
+    stream << std::fixed << std::setprecision(1) << seconds << "s";
+  } else if (seconds >= 1.0) {
+    stream << std::fixed << std::setprecision(2) << seconds << "s";
+  } else {
+    stream << std::fixed << std::setprecision(0) << (seconds * 1000.0) << "ms";
+  }
+  return stream.str();
+}
+
 template<typename T>
 inline std::string scalar_to_string(const T & value) {
   std::ostringstream stream;
@@ -154,6 +179,9 @@ struct TopicEntry {
   std::deque<Sample> samples;
   std::deque<IntervalSample> intervals;
   std::size_t sample_bytes_sum{0};
+  std::size_t total_missed_messages{0};
+  double recovery_duration_sum_seconds{0.0};
+  std::size_t recovery_count{0};
   std::vector<DetailRow> detail_rows;
   std::map<std::string, std::deque<PlotSample>> plot_samples;
   std::string detail_error;
@@ -167,6 +195,10 @@ struct TopicRow {
   std::string avg_hz;
   std::string min_max_hz;
   std::string bandwidth;
+  std::string avg_recovery_time;
+  bool has_expected_frequency{false};
+  std::size_t current_missed_messages{0};
+  std::size_t total_missed_messages{0};
 };
 
 struct TopicListItem {
@@ -204,8 +236,9 @@ private:
   std::vector<PlotSample> plot_samples_snapshot(
     const std::string & topic_name, const std::string & field_path) const;
   std::string detail_error_snapshot(const std::string & topic_name) const;
-  static void compute_stats(
-    const TopicEntry & entry, std::string & avg_hz, std::string & min_max_hz, std::string & bandwidth);
+  static std::optional<double> average_period_seconds(const TopicEntry & entry);
+  static std::size_t missed_messages_for_gap(double seconds_since_last, double average_period);
+  static void compute_stats(const TopicEntry & entry, TopicClock::time_point now, TopicRow & row);
   void toggle_selected_topic_monitoring();
   void open_selected_topic_detail();
   void close_topic_detail();
