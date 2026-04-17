@@ -148,6 +148,41 @@ std::string make_help_popup_title() {
   return title;
 }
 
+std::vector<std::string> log_source_candidates_for_node(const std::string & node_name) {
+  std::vector<std::string> candidates;
+  auto append_unique = [&candidates](const std::string & candidate) {
+      if (!candidate.empty() &&
+        std::find(candidates.begin(), candidates.end(), candidate) == candidates.end())
+      {
+        candidates.push_back(candidate);
+      }
+    };
+
+  append_unique(node_name);
+  std::string without_leading_slash = node_name;
+  if (!without_leading_slash.empty() && without_leading_slash.front() == '/') {
+    without_leading_slash.erase(without_leading_slash.begin());
+  }
+  append_unique(without_leading_slash);
+
+  std::string dotted = without_leading_slash;
+  std::replace(dotted.begin(), dotted.end(), '/', '.');
+  append_unique(dotted);
+
+  const auto slash = node_name.rfind('/');
+  append_unique(slash == std::string::npos ? node_name : node_name.substr(slash + 1));
+  return candidates;
+}
+
+std::string primary_log_source_for_node(const std::string & node_name) {
+  std::string source = node_name;
+  if (!source.empty() && source.front() == '/') {
+    source.erase(source.begin());
+  }
+  std::replace(source.begin(), source.end(), '/', '.');
+  return source.empty() ? node_name : source;
+}
+
 }  // namespace
 
 NodeCommanderScreen::NodeCommanderScreen(std::shared_ptr<NodeCommanderBackend> backend)
@@ -389,7 +424,26 @@ void NodeCommanderScreen::refresh_detail_lines_cache(bool force) {
   detail_lines_cache_.reserve(raw_detail_lines_cache_.size());
 
   for (const auto & line : raw_detail_lines_cache_) {
-    if (!line.is_header && !line.section_key.empty() && is_detail_section_collapsed(line.section_key)) {
+    bool hidden_by_collapsed_section = false;
+    for (const auto & [section_key, collapsed] : collapsed_detail_sections_) {
+      if (!collapsed || section_key.empty() || line.section_key.empty()) {
+        continue;
+      }
+      const bool exact_section = line.section_key == section_key;
+      const bool child_section =
+        line.section_key.size() > section_key.size() &&
+        line.section_key.compare(0, section_key.size(), section_key) == 0 &&
+        line.section_key[section_key.size()] == '/';
+      if (!exact_section && !child_section) {
+        continue;
+      }
+      if (line.is_header && exact_section) {
+        continue;
+      }
+      hidden_by_collapsed_section = true;
+      break;
+    }
+    if (hidden_by_collapsed_section) {
       continue;
     }
     detail_lines_cache_.push_back(line);
@@ -691,6 +745,15 @@ bool NodeCommanderScreen::launch_selected_detail_action() {
         line->is_header ? "" : line->target,
         &service_error);
       break;
+    case NodeDetailAction::OpenLogViewer: {
+        LogViewerLaunchOptions options;
+        options.embedded_mode = true;
+        options.initial_live_source = primary_log_source_for_node(line->target);
+        options.live_source_aliases = log_source_candidates_for_node(line->target);
+        options.open_live_source_on_start = true;
+        (void)run_log_viewer_tool(options);
+      }
+      break;
     case NodeDetailAction::None:
       break;
   }
@@ -720,11 +783,19 @@ std::vector<std::string> NodeCommanderScreen::detail_targets_for_section(
   const std::string & section_key, NodeDetailAction action) const
 {
   std::vector<std::string> targets;
+  const std::string child_section_prefix = section_key + "/";
   for (const auto & line : raw_detail_lines_cache_) {
-    if (line.is_header || line.section_key != section_key || line.action != action || line.target.empty()) {
+    const bool matching_section =
+      line.section_key == section_key ||
+      (!section_key.empty() &&
+      line.section_key.size() > child_section_prefix.size() &&
+      line.section_key.compare(0, child_section_prefix.size(), child_section_prefix) == 0);
+    if (line.is_header || !matching_section || line.action != action || line.target.empty()) {
       continue;
     }
-    targets.push_back(line.target);
+    if (std::find(targets.begin(), targets.end(), line.target) == targets.end()) {
+      targets.push_back(line.target);
+    }
   }
   return targets;
 }
@@ -874,14 +945,17 @@ void NodeCommanderScreen::draw_detail_pane(int top, int left, int bottom, int ri
       apply_role_chgat(row_y, left, width, kColorSelection);
     }
     if (line.is_header) {
-      const std::string marker = is_detail_section_collapsed(line.section_key) ? "[+]" : "[-]";
-      const std::string rendered = marker + " " + line.text;
+      std::string rendered = line.text;
+      if (!line.section_key.empty()) {
+        const std::string marker = is_detail_section_collapsed(line.section_key) ? "[+]" : "[-]";
+        rendered = marker + " " + rendered;
+      }
       if (line.action != NodeDetailAction::None) {
         attron(COLOR_PAIR(kColorAccent) | A_BOLD);
       } else {
         attron(theme_attr(kColorHeader));
       }
-      mvprintw(row_y, left, "%-*s", width, truncate_text(rendered, width).c_str());
+      mvprintw(row_y, left, "%-*s", width, truncate_text(indent + rendered, width).c_str());
       if (line.action != NodeDetailAction::None) {
         attroff(COLOR_PAIR(kColorAccent) | A_BOLD);
       } else {

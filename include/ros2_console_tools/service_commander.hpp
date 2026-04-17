@@ -127,6 +127,7 @@ private:
   void refresh_node_list();
   void maybe_refresh_node_list();
   void warm_up_node_list();
+  void warm_up_initial_service();
   void select_current_node();
   void switch_to_node_list();
   void refresh_services();

@@ -21,6 +21,7 @@ enum class NodeDetailAction {
   OpenParameters,
   OpenTopicMonitor,
   OpenServiceCommander,
+  OpenLogViewer,
 };
 
 struct GraphEndpoint {

@@ -22,6 +22,16 @@
 
 namespace ros2_console_tools {
 
+struct LogViewerLaunchOptions {
+  bool embedded_mode{false};
+  std::vector<std::string> selected_sources;
+  bool hide_unselected_on_start{false};
+  std::string initial_live_source;
+  std::vector<std::string> live_source_aliases;
+  bool open_live_source_on_start{false};
+};
+
+int run_log_viewer_tool(const LogViewerLaunchOptions & options);
 int run_log_viewer_tool(bool embedded_mode = false);
 
 using LogViewerClock = std::chrono::steady_clock;
@@ -100,7 +110,7 @@ class LogViewerScreen;
 
 class LogViewerBackend : public rclcpp::Node {
 public:
-  LogViewerBackend();
+  explicit LogViewerBackend(const LogViewerLaunchOptions & options = {});
   void initialize_subscription();
 
 private:
@@ -114,6 +124,7 @@ private:
   std::vector<SourceEntry> source_snapshot() const;
   std::vector<LogEntry> filtered_logs_snapshot() const;
   std::vector<LogEntry> live_source_logs_snapshot() const;
+  bool log_source_matches_live_source(const std::string & source) const;
   void toggle_selected_source();
   void open_detail_popup(const std::vector<LogEntry> & snapshot);
   void open_live_detail_popup(const std::vector<LogEntry> & snapshot);
@@ -131,6 +142,8 @@ private:
   rclcpp::Subscription<LogMessage>::SharedPtr log_subscription_;
   std::deque<LogEntry> logs_;
   std::map<std::string, bool> sources_;
+  std::vector<std::string> initial_selected_sources_;
+  std::vector<std::string> live_source_aliases_;
   LogViewerViewMode view_mode_{LogViewerViewMode::Split};
   PaneFocus focus_{PaneFocus::Sources};
   int selected_source_index_{0};

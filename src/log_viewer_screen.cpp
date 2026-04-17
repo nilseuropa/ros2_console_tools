@@ -14,10 +14,10 @@
 
 namespace ros2_console_tools {
 
-int run_log_viewer_tool(bool embedded_mode) {
-  auto backend = std::make_shared<LogViewerBackend>();
+int run_log_viewer_tool(const LogViewerLaunchOptions & options) {
+  auto backend = std::make_shared<LogViewerBackend>(options);
   backend->initialize_subscription();
-  LogViewerScreen screen(backend, embedded_mode);
+  LogViewerScreen screen(backend, options.embedded_mode);
 
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(backend);
@@ -30,6 +30,12 @@ int run_log_viewer_tool(bool embedded_mode) {
     spin_thread.join();
   }
   return result;
+}
+
+int run_log_viewer_tool(bool embedded_mode) {
+  LogViewerLaunchOptions options;
+  options.embedded_mode = embedded_mode;
+  return run_log_viewer_tool(options);
 }
 
 namespace {

@@ -6,8 +6,11 @@
 
 namespace ros2_console_tools {
 
-LogViewerBackend::LogViewerBackend()
-: Node("log_viewer")
+LogViewerBackend::LogViewerBackend(const LogViewerLaunchOptions & options)
+: Node("log_viewer"),
+  initial_selected_sources_(options.selected_sources),
+  live_source_aliases_(options.live_source_aliases),
+  hide_unselected_(options.hide_unselected_on_start)
 {
   const std::string theme_config_path =
     this->declare_parameter<std::string>("theme_config_path", tui::default_theme_config_path());
@@ -16,6 +19,23 @@ LogViewerBackend::LogViewerBackend()
     if (theme_config_path != tui::default_theme_config_path()) {
       RCLCPP_WARN(this->get_logger(), "%s", theme_error.c_str());
     }
+  }
+
+  for (const auto & source : initial_selected_sources_) {
+    if (!source.empty()) {
+      sources_[source] = true;
+    }
+  }
+
+  if (options.open_live_source_on_start && !options.initial_live_source.empty()) {
+    live_source_name_ = options.initial_live_source;
+    if (std::find(live_source_aliases_.begin(), live_source_aliases_.end(), live_source_name_) ==
+      live_source_aliases_.end())
+    {
+      live_source_aliases_.push_back(live_source_name_);
+    }
+    view_mode_ = LogViewerViewMode::SourceLive;
+    set_status_locked("Live view: " + live_source_name_ + ".");
   }
 }
 
@@ -63,13 +83,16 @@ void LogViewerBackend::on_log_message(const LogMessage & message) {
   entry.file = message.file;
   entry.function_name = message.function;
   entry.line = message.line;
+  const std::string source_name = entry.source;
   logs_.push_back(std::move(entry));
   if (logs_.size() > kMaxLogs) {
     logs_.pop_front();
   }
 
-  if (sources_.find(message.name) == sources_.end()) {
-    sources_[message.name] = false;
+  if (sources_.find(source_name) == sources_.end()) {
+    sources_[source_name] =
+      std::find(initial_selected_sources_.begin(), initial_selected_sources_.end(), source_name) !=
+      initial_selected_sources_.end();
   }
   last_message_time_ = LogViewerClock::now();
 }
@@ -133,7 +156,7 @@ std::vector<LogEntry> LogViewerBackend::live_source_logs_snapshot() const {
 
   for (auto it = logs_.rbegin(); it != logs_.rend(); ++it) {
     const auto & log = *it;
-    if (log.source != live_source_name_) {
+    if (!log_source_matches_live_source(log.source)) {
       continue;
     }
     if (log.level < minimum_level_) {
@@ -152,6 +175,14 @@ std::vector<LogEntry> LogViewerBackend::live_source_logs_snapshot() const {
   }
 
   return snapshot;
+}
+
+bool LogViewerBackend::log_source_matches_live_source(const std::string & source) const {
+  if (source == live_source_name_) {
+    return true;
+  }
+  return std::find(live_source_aliases_.begin(), live_source_aliases_.end(), source) !=
+    live_source_aliases_.end();
 }
 
 void LogViewerBackend::toggle_selected_source() {
@@ -205,6 +236,8 @@ void LogViewerBackend::open_live_source() {
   }
 
   live_source_name_ = snapshot[static_cast<std::size_t>(selected_source_index_)].name;
+  live_source_aliases_.clear();
+  live_source_aliases_.push_back(live_source_name_);
   view_mode_ = LogViewerViewMode::SourceLive;
   live_log_scroll_ = 0;
   selected_live_log_index_ = 0;

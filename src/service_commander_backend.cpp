@@ -102,6 +102,21 @@ void ServiceCommanderBackend::warm_up_node_list() {
   }
 }
 
+void ServiceCommanderBackend::warm_up_initial_service() {
+  if (initial_service_name_.empty() || target_node_.empty()) {
+    return;
+  }
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1200);
+  while (!initial_service_name_.empty() && std::chrono::steady_clock::now() < deadline && rclcpp::ok()) {
+    refresh_services();
+    if (view_mode_ == ServiceCommanderViewMode::ServiceDetail) {
+      return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+}
+
 void ServiceCommanderBackend::refresh_services() {
   if (target_node_.empty()) {
     view_mode_ = ServiceCommanderViewMode::NodeList;
@@ -131,7 +146,11 @@ void ServiceCommanderBackend::refresh_services() {
     return;
   }
 
-  auto_open_initial_service_ = false;
+  if (!initial_service_name_.empty()) {
+    status_line_ = "Waiting for " + initial_service_name_ + " on " + target_node_ + ". Press F4 to retry.";
+    return;
+  }
+
   status_line_ =
     "Loaded " + std::to_string(services_.size()) + " services from " + target_node_ + ".";
 }

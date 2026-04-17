@@ -428,6 +428,7 @@ if(BUILD_TESTING)
     target_include_directories(node_commander_screen_test PRIVATE ${CURSES_INCLUDE_DIR} include)
     target_link_libraries(node_commander_screen_test
       node_commander_lib
+      log_viewer_lib
     )
   endif()
 

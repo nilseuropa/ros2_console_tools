@@ -81,6 +81,7 @@ int ServiceCommanderScreen::run() {
   } else {
     backend_->refresh_services();
   }
+  backend_->warm_up_initial_service();
 
   bool running = true;
   while (running && rclcpp::ok()) {

@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>ros2_console_tools</name>
-  <version>1.5.5</version>
+  <version>1.5.6</version>
   <description>Console tools for ROS 2 topics, parameters, and runtime operations.</description>
   <maintainer email="marton@nowtech.hu">nilseuropa</maintainer>
   <license>Apache-2.0</license>

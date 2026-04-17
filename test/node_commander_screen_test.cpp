@@ -10,6 +10,7 @@
 #include <thread>
 
 #define private public
+#include "ros2_console_tools/log_viewer.hpp"
 #include "ros2_console_tools/node_commander.hpp"
 #undef private
 
@@ -31,7 +32,7 @@ protected:
   }
 };
 
-TEST_F(NodeCommanderScreenTest, HeaderActionsExposeNodeScopedToolsAndCollapseHidesChildren) {
+TEST_F(NodeCommanderScreenTest, DetailTreeUsesNodeRootAndActionableNodeScopedFolders) {
   auto target_node = std::make_shared<rclcpp::Node>("node_commander_test_target");
   target_node->declare_parameter("example_parameter", 7);
   auto publisher = target_node->create_publisher<geometry_msgs::msg::Twist>("/node_commander_test/out", 10);
@@ -81,6 +82,21 @@ TEST_F(NodeCommanderScreenTest, HeaderActionsExposeNodeScopedToolsAndCollapseHid
 
   EXPECT_TRUE(detail_lines_ready);
 
+  ASSERT_FALSE(lines.empty());
+  EXPECT_TRUE(lines.front().is_header);
+  EXPECT_EQ(lines.front().text, "/node_commander_test_target");
+  EXPECT_EQ(lines.front().depth, 0);
+  EXPECT_EQ(lines.front().action, NodeDetailAction::None);
+  EXPECT_TRUE(lines.front().section_key.empty());
+
+  const auto node_label = std::find_if(
+    std::next(lines.begin()),
+    lines.end(),
+    [](const DetailLine & line) {
+      return !line.is_header && line.text == "/node_commander_test_target";
+    });
+  EXPECT_EQ(node_label, lines.end());
+
   const auto parameter_header = std::find_if(
     lines.begin(),
     lines.end(),
@@ -93,15 +109,35 @@ TEST_F(NodeCommanderScreenTest, HeaderActionsExposeNodeScopedToolsAndCollapseHid
     });
   EXPECT_NE(parameter_header, lines.end());
 
+  const auto parameter_child = std::find_if(
+    lines.begin(),
+    lines.end(),
+    [](const DetailLine & line) {
+      return !line.is_header && line.section_key == "parameters";
+    });
+  EXPECT_EQ(parameter_child, lines.end());
+
+  const auto topics_header = std::find_if(
+    lines.begin(),
+    lines.end(),
+    [](const DetailLine & line) {
+      return line.is_header &&
+        line.text == "Topics" &&
+        line.action == NodeDetailAction::OpenTopicMonitor &&
+        line.target == "/node_commander_test_target" &&
+        line.section_key == "topics";
+    });
+  EXPECT_NE(topics_header, lines.end());
+
   const auto publishers_header = std::find_if(
     lines.begin(),
     lines.end(),
     [](const DetailLine & line) {
       return line.is_header &&
         line.text == "Publishers" &&
+        line.depth == 1 &&
         line.action == NodeDetailAction::OpenTopicMonitor &&
-        line.target == "/node_commander_test_target" &&
-        line.section_key == "publishers";
+        line.section_key == "topics/publishers";
     });
   EXPECT_NE(publishers_header, lines.end());
 
@@ -111,9 +147,9 @@ TEST_F(NodeCommanderScreenTest, HeaderActionsExposeNodeScopedToolsAndCollapseHid
     [](const DetailLine & line) {
       return line.is_header &&
         line.text == "Subscribers" &&
+        line.depth == 1 &&
         line.action == NodeDetailAction::OpenTopicMonitor &&
-        line.target == "/node_commander_test_target" &&
-        line.section_key == "subscribers";
+        line.section_key == "topics/subscribers";
     });
   EXPECT_NE(subscribers_header, lines.end());
 
@@ -128,6 +164,26 @@ TEST_F(NodeCommanderScreenTest, HeaderActionsExposeNodeScopedToolsAndCollapseHid
         line.section_key == "services";
     });
   EXPECT_NE(services_header, lines.end());
+
+  const auto logs_header = std::find_if(
+    lines.begin(),
+    lines.end(),
+    [](const DetailLine & line) {
+      return line.is_header &&
+        line.text == "Logs" &&
+        line.action == NodeDetailAction::OpenLogViewer &&
+        line.target == "/node_commander_test_target" &&
+        line.section_key == "logs";
+    });
+  EXPECT_NE(logs_header, lines.end());
+
+  const auto logs_child = std::find_if(
+    lines.begin(),
+    lines.end(),
+    [](const DetailLine & line) {
+      return !line.is_header && line.section_key == "logs";
+    });
+  EXPECT_EQ(logs_child, lines.end());
 
   const auto service_entry = std::find_if(
     lines.begin(),
@@ -144,8 +200,9 @@ TEST_F(NodeCommanderScreenTest, HeaderActionsExposeNodeScopedToolsAndCollapseHid
     lines.end(),
     [](const DetailLine & line) {
       return !line.is_header &&
-        line.section_key == "publishers" &&
+        line.section_key == "topics/publishers" &&
         line.action == NodeDetailAction::OpenTopicMonitor &&
+        line.depth == 2 &&
         line.target == "/node_commander_test/out";
     });
   EXPECT_NE(publisher_entry, lines.end());
@@ -155,23 +212,22 @@ TEST_F(NodeCommanderScreenTest, HeaderActionsExposeNodeScopedToolsAndCollapseHid
     lines.end(),
     [](const DetailLine & line) {
       return !line.is_header &&
-        line.section_key == "subscribers" &&
+        line.section_key == "topics/subscribers" &&
         line.action == NodeDetailAction::OpenTopicMonitor &&
+        line.depth == 2 &&
         line.target == "/node_commander_test/in";
     });
   EXPECT_NE(subscriber_entry, lines.end());
 
   screen.refresh_detail_lines_cache();
-  const auto publisher_targets =
-    screen.detail_targets_for_section("publishers", NodeDetailAction::OpenTopicMonitor);
-  const auto subscriber_targets =
-    screen.detail_targets_for_section("subscribers", NodeDetailAction::OpenTopicMonitor);
+  const auto topic_targets =
+    screen.detail_targets_for_section("topics", NodeDetailAction::OpenTopicMonitor);
   EXPECT_NE(
-    std::find(publisher_targets.begin(), publisher_targets.end(), "/node_commander_test/out"),
-    publisher_targets.end());
+    std::find(topic_targets.begin(), topic_targets.end(), "/node_commander_test/out"),
+    topic_targets.end());
   EXPECT_NE(
-    std::find(subscriber_targets.begin(), subscriber_targets.end(), "/node_commander_test/in"),
-    subscriber_targets.end());
+    std::find(topic_targets.begin(), topic_targets.end(), "/node_commander_test/in"),
+    topic_targets.end());
 
   const bool service_child_visible_before = std::any_of(
     screen.detail_lines_cache_.begin(),
@@ -204,8 +260,63 @@ TEST_F(NodeCommanderScreenTest, HeaderActionsExposeNodeScopedToolsAndCollapseHid
   EXPECT_TRUE(services_header_visible_after);
   EXPECT_FALSE(service_child_visible_after);
 
+  screen.collapsed_detail_sections_.clear();
+  screen.collapsed_detail_sections_["topics"] = true;
+  screen.refresh_detail_lines_cache();
+
+  const bool topics_header_visible_after = std::any_of(
+    screen.detail_lines_cache_.begin(),
+    screen.detail_lines_cache_.end(),
+    [](const DetailLine & line) {
+      return line.is_header && line.text == "Topics" && line.section_key == "topics";
+    });
+  const bool topic_child_visible_after = std::any_of(
+    screen.detail_lines_cache_.begin(),
+    screen.detail_lines_cache_.end(),
+    [](const DetailLine & line) {
+      return line.section_key.rfind("topics", 0) == 0 && !(line.is_header && line.text == "Topics");
+    });
+
+  EXPECT_TRUE(topics_header_visible_after);
+  EXPECT_FALSE(topic_child_visible_after);
+
+  screen.collapsed_detail_sections_.clear();
+  screen.collapsed_detail_sections_["topics/publishers"] = true;
+  screen.refresh_detail_lines_cache();
+
+  const bool publishers_header_visible_after = std::any_of(
+    screen.detail_lines_cache_.begin(),
+    screen.detail_lines_cache_.end(),
+    [](const DetailLine & line) {
+      return line.is_header && line.text == "Publishers" && line.section_key == "topics/publishers";
+    });
+  const bool publisher_child_visible_after = std::any_of(
+    screen.detail_lines_cache_.begin(),
+    screen.detail_lines_cache_.end(),
+    [](const DetailLine & line) {
+      return !line.is_header && line.section_key == "topics/publishers";
+    });
+
+  EXPECT_TRUE(publishers_header_visible_after);
+  EXPECT_FALSE(publisher_child_visible_after);
+
   stop_executor(backend_executor, backend_spin_thread);
   stop_executor(target_executor, target_spin_thread);
+}
+
+TEST_F(NodeCommanderScreenTest, LogViewerLiveLaunchDoesNotPreseedAliasSources) {
+  LogViewerLaunchOptions options;
+  options.initial_live_source = "attention_layer";
+  options.live_source_aliases = {"/attention_layer", "attention_layer"};
+  options.open_live_source_on_start = true;
+
+  auto backend = std::make_shared<LogViewerBackend>(options);
+
+  EXPECT_EQ(backend->view_mode_, LogViewerViewMode::SourceLive);
+  EXPECT_EQ(backend->live_source_name_, "attention_layer");
+  EXPECT_TRUE(backend->source_snapshot().empty());
+  EXPECT_TRUE(backend->log_source_matches_live_source("/attention_layer"));
+  EXPECT_TRUE(backend->log_source_matches_live_source("attention_layer"));
 }
 
 }  // namespace

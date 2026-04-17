@@ -99,56 +99,61 @@ std::vector<DetailLine> NodeCommanderBackend::selected_node_details() const {
     details = build_node_details(selected_node);
   } catch (const std::exception & exception) {
     return {
-      {"Node", true, 0, NodeDetailAction::None, "", "node"},
-      {selected_node, false, 1, NodeDetailAction::None, "", "node"},
+      {selected_node, true, 0, NodeDetailAction::None, "", ""},
       {"Details", true, 0, NodeDetailAction::None, "", "details"},
       {std::string("Failed to load node details: ") + exception.what(), false, 1, NodeDetailAction::None, "", "details"},
     };
   }
 
   std::vector<DetailLine> lines;
-  lines.push_back({"Node", true, 0, NodeDetailAction::None, "", "node"});
-  lines.push_back({details.node_name, false, 1, NodeDetailAction::None, "", "node"});
-  lines.push_back({"Parameter Services", true, 0, NodeDetailAction::OpenParameters, details.node_name, "parameters"});
-  lines.push_back({
-    details.parameter_services_ready ? "available" : "unavailable",
-    false,
-    1,
-    NodeDetailAction::None,
-    "",
-    "parameters"});
+  lines.push_back({details.node_name, true, 0, NodeDetailAction::None, "", ""});
 
-  auto append_section =
-    [&lines, &details](
+  if (details.parameter_services_ready) {
+    lines.push_back({"Parameter Services", true, 0, NodeDetailAction::OpenParameters, details.node_name, "parameters"});
+  }
+
+  auto append_topic_group =
+    [&lines](
     const std::string & title,
     const std::string & section_key,
     const std::vector<GraphEndpoint> & entries)
     {
-      NodeDetailAction header_action = NodeDetailAction::None;
-      if (section_key == "publishers" || section_key == "subscribers") {
-        header_action = NodeDetailAction::OpenTopicMonitor;
-      } else if (section_key == "services") {
-        header_action = NodeDetailAction::OpenServiceCommander;
+      lines.push_back({title, true, 1, NodeDetailAction::OpenTopicMonitor, "", section_key});
+      if (entries.empty()) {
+        lines.push_back({"-", false, 2, NodeDetailAction::None, "", section_key});
+        return;
       }
-      lines.push_back({title, true, 0, header_action, details.node_name, section_key});
-    if (entries.empty()) {
-      lines.push_back({"-", false, 1, NodeDetailAction::None, "", section_key});
-      return;
-    }
-    for (const auto & entry : entries) {
-      NodeDetailAction action = NodeDetailAction::None;
-      if (section_key == "publishers" || section_key == "subscribers") {
-        action = NodeDetailAction::OpenTopicMonitor;
-      } else if (section_key == "services") {
-        action = NodeDetailAction::OpenServiceCommander;
+      for (const auto & entry : entries) {
+        lines.push_back({
+          entry.name + " [" + entry.type + "]",
+          false,
+          2,
+          NodeDetailAction::OpenTopicMonitor,
+          entry.name,
+          section_key});
       }
-      lines.push_back({entry.name + " [" + entry.type + "]", false, 1, action, entry.name, section_key});
-    }
-  };
+    };
 
-  append_section("Publishers", "publishers", details.publishers);
-  append_section("Subscribers", "subscribers", details.subscribers);
-  append_section("Services", "services", details.services);
+  lines.push_back({"Topics", true, 0, NodeDetailAction::OpenTopicMonitor, details.node_name, "topics"});
+  append_topic_group("Publishers", "topics/publishers", details.publishers);
+  append_topic_group("Subscribers", "topics/subscribers", details.subscribers);
+
+  lines.push_back({"Services", true, 0, NodeDetailAction::OpenServiceCommander, details.node_name, "services"});
+  if (details.services.empty()) {
+    lines.push_back({"-", false, 1, NodeDetailAction::None, "", "services"});
+  } else {
+    for (const auto & entry : details.services) {
+      lines.push_back({
+        entry.name + " [" + entry.type + "]",
+        false,
+        1,
+        NodeDetailAction::OpenServiceCommander,
+        entry.name,
+        "services"});
+    }
+  }
+
+  lines.push_back({"Logs", true, 0, NodeDetailAction::OpenLogViewer, details.node_name, "logs"});
   return lines;
 }
 
