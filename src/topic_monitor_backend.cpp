@@ -1,5 +1,7 @@
 #include "ros2_console_tools/topic_monitor.hpp"
 
+#include <cmath>
+
 namespace ros2_console_tools {
 
 TopicMonitorBackend::TopicMonitorBackend(const TopicMonitorLaunchOptions & options)
@@ -183,20 +185,24 @@ std::vector<TopicRow> TopicMonitorBackend::topic_rows_snapshot() const {
   std::lock_guard<std::mutex> lock(mutex_);
   std::vector<TopicRow> rows;
   rows.reserve(topics_.size());
+  const auto now = TopicClock::now();
 
   for (const auto & [name, entry] : topics_) {
     TopicRow row;
     row.name = name;
     row.type = entry.type;
     row.monitored = entry.monitored;
-    row.stale = entry.monitored && entry.has_last_message &&
-      ((TopicClock::now() - entry.last_message_time) > kStaleAfter);
+    row.stale = false;
     row.avg_hz = "-";
     row.min_max_hz = "-";
     row.bandwidth = "-";
+    row.avg_recovery_time = "-";
 
     if (entry.monitored) {
-      compute_stats(entry, row.avg_hz, row.min_max_hz, row.bandwidth);
+      compute_stats(entry, now, row);
+      row.stale =
+        (row.has_expected_frequency && row.current_missed_messages > 0) ||
+        (!row.has_expected_frequency && entry.has_last_message && ((now - entry.last_message_time) > kStaleAfter));
     }
 
     if (show_only_monitored_ && !row.monitored) {
@@ -271,25 +277,56 @@ std::string TopicMonitorBackend::detail_error_snapshot(const std::string & topic
   return found->second.detail_error;
 }
 
-void TopicMonitorBackend::compute_stats(
-  const TopicEntry & entry, std::string & avg_hz, std::string & min_max_hz, std::string & bandwidth)
+std::optional<double> TopicMonitorBackend::average_period_seconds(const TopicEntry & entry) {
+  if (entry.intervals.empty()) {
+    return std::nullopt;
+  }
+
+  const auto interval_sum = std::accumulate(
+    entry.intervals.begin(), entry.intervals.end(), 0.0,
+    [](double sum, const IntervalSample & interval) { return sum + interval.seconds; });
+  if (interval_sum <= 0.0) {
+    return std::nullopt;
+  }
+
+  return interval_sum / static_cast<double>(entry.intervals.size());
+}
+
+std::size_t TopicMonitorBackend::missed_messages_for_gap(
+  double seconds_since_last, double average_period)
 {
-  if (!entry.intervals.empty()) {
-    const auto interval_sum = std::accumulate(
-      entry.intervals.begin(), entry.intervals.end(), 0.0,
-      [](double sum, const IntervalSample & interval) { return sum + interval.seconds; });
+  if (average_period <= 0.0 || seconds_since_last < average_period) {
+    return 0;
+  }
 
-    if (interval_sum > 0.0) {
-      const double average = static_cast<double>(entry.intervals.size()) / interval_sum;
-      double min_period = entry.intervals.front().seconds;
-      double max_period = entry.intervals.front().seconds;
-      for (const auto & interval : entry.intervals) {
-        min_period = std::min(min_period, interval.seconds);
-        max_period = std::max(max_period, interval.seconds);
-      }
+  return static_cast<std::size_t>(std::floor((seconds_since_last / average_period) + 1e-9));
+}
 
-      avg_hz = format_hz(average);
-      min_max_hz = format_hz(1.0 / max_period) + "/" + format_hz(1.0 / min_period);
+void TopicMonitorBackend::compute_stats(
+  const TopicEntry & entry, TopicClock::time_point now, TopicRow & row)
+{
+  row.total_missed_messages = entry.total_missed_messages;
+  if (entry.recovery_count > 0) {
+    row.avg_recovery_time = format_duration(
+      entry.recovery_duration_sum_seconds / static_cast<double>(entry.recovery_count));
+  }
+
+  if (const auto average_period = average_period_seconds(entry)) {
+    const double average = 1.0 / *average_period;
+    double min_period = entry.intervals.front().seconds;
+    double max_period = entry.intervals.front().seconds;
+    for (const auto & interval : entry.intervals) {
+      min_period = std::min(min_period, interval.seconds);
+      max_period = std::max(max_period, interval.seconds);
+    }
+
+    row.avg_hz = format_hz(average);
+    row.min_max_hz = format_hz(1.0 / max_period) + "/" + format_hz(1.0 / min_period);
+    if (entry.has_last_message) {
+      const double seconds_since_last = std::chrono::duration<double>(now - entry.last_message_time).count();
+      row.has_expected_frequency = true;
+      row.current_missed_messages = missed_messages_for_gap(seconds_since_last, *average_period);
+      row.total_missed_messages += row.current_missed_messages;
     }
   }
 
@@ -297,7 +334,7 @@ void TopicMonitorBackend::compute_stats(
     const auto span = std::chrono::duration<double>(
       entry.samples.back().time - entry.samples.front().time).count();
     if (span > 0.0) {
-      bandwidth = format_bandwidth(static_cast<double>(entry.sample_bytes_sum) / span);
+      row.bandwidth = format_bandwidth(static_cast<double>(entry.sample_bytes_sum) / span);
     }
   }
 }
@@ -483,6 +520,9 @@ void TopicMonitorBackend::stop_monitoring(const std::string & topic_name) {
     found->second.samples.clear();
     found->second.intervals.clear();
     found->second.sample_bytes_sum = 0;
+    found->second.total_missed_messages = 0;
+    found->second.recovery_duration_sum_seconds = 0.0;
+    found->second.recovery_count = 0;
     found->second.has_last_message = false;
     found->second.detail_rows.clear();
     found->second.plot_samples.clear();
@@ -534,6 +574,14 @@ void TopicMonitorBackend::on_message(
   if (entry.has_last_message) {
     const double seconds = std::chrono::duration<double>(now - entry.last_message_time).count();
     if (seconds > 0.0) {
+      if (const auto average_period = average_period_seconds(entry)) {
+        const auto missed_messages = missed_messages_for_gap(seconds, *average_period);
+        if (missed_messages > 0) {
+          entry.total_missed_messages += missed_messages;
+          entry.recovery_duration_sum_seconds += seconds;
+          ++entry.recovery_count;
+        }
+      }
       entry.intervals.push_back({now, seconds});
     }
   }
@@ -559,7 +607,7 @@ void TopicMonitorBackend::on_message(
     entry.sample_bytes_sum -= entry.samples.front().bytes;
     entry.samples.pop_front();
   }
-  while (!entry.intervals.empty() && entry.intervals.front().time < cutoff) {
+  while (entry.intervals.size() > 1 && entry.intervals.front().time < cutoff) {
     entry.intervals.pop_front();
   }
 }

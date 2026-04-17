@@ -417,13 +417,18 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
 
   const int visible_rows = std::max(1, bottom - top + 1);
   const int width = right - left + 1;
-  const int topic_width = std::max(24, width / 2);
   const int avg_width = std::max(8, width / 10);
   const int minmax_width = std::max(12, width / 8);
-  const int bandwidth_width = std::max(12, width - topic_width - avg_width - minmax_width - 3);
+  const int missed_width = std::max(8, width / 12);
+  const int recovery_width = std::max(10, width / 12);
+  const int bandwidth_width = std::max(12, width / 8);
+  const int topic_width =
+    std::max(24, width - avg_width - minmax_width - missed_width - recovery_width - bandwidth_width - 5);
   const int sep_one_x = left + topic_width;
   const int sep_two_x = sep_one_x + 1 + avg_width;
   const int sep_three_x = sep_two_x + 1 + minmax_width;
+  const int sep_four_x = sep_three_x + 1 + missed_width;
+  const int sep_five_x = sep_four_x + 1 + recovery_width;
 
   if (backend_->selected_index_ < backend_->list_scroll_) {
     backend_->list_scroll_ = backend_->selected_index_;
@@ -439,7 +444,11 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
   draw_box_char(top, sep_two_x, WACS_VLINE, '|');
   mvprintw(top, sep_two_x + 1, "%-*s", minmax_width, "Min/Max Hz");
   draw_box_char(top, sep_three_x, WACS_VLINE, '|');
-  mvprintw(top, sep_three_x + 1, "%-*s", bandwidth_width, "Bandwidth");
+  mvprintw(top, sep_three_x + 1, "%-*s", missed_width, "Missed");
+  draw_box_char(top, sep_four_x, WACS_VLINE, '|');
+  mvprintw(top, sep_four_x + 1, "%-*s", recovery_width, "Avg Back");
+  draw_box_char(top, sep_five_x, WACS_VLINE, '|');
+  mvprintw(top, sep_five_x + 1, "%-*s", bandwidth_width, "Bandwidth");
   attroff(theme_attr(kColorHeader));
 
   const int first_row = backend_->list_scroll_;
@@ -455,6 +464,8 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
     draw_box_char(row, sep_one_x, WACS_VLINE, '|');
     draw_box_char(row, sep_two_x, WACS_VLINE, '|');
     draw_box_char(row, sep_three_x, WACS_VLINE, '|');
+    draw_box_char(row, sep_four_x, WACS_VLINE, '|');
+    draw_box_char(row, sep_five_x, WACS_VLINE, '|');
 
     if (!has_item) {
       continue;
@@ -476,12 +487,17 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
         draw_box_char(row, sep_one_x, WACS_VLINE, '|');
         draw_box_char(row, sep_two_x, WACS_VLINE, '|');
         draw_box_char(row, sep_three_x, WACS_VLINE, '|');
+        draw_box_char(row, sep_four_x, WACS_VLINE, '|');
+        draw_box_char(row, sep_five_x, WACS_VLINE, '|');
         apply_role_chgat(row, left, topic_width, kColorSelection);
       }
       continue;
     }
 
     const auto & row_data = entry.row;
+    const std::string missed_text = row_data.monitored
+      ? std::to_string(row_data.total_missed_messages)
+      : "-";
     const int text_color =
       row_data.stale
       ? (selected ? kColorStaleSelection : kColorStale)
@@ -497,7 +513,13 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
       row, sep_two_x + 1, "%-*s", minmax_width,
       truncate_text(row_data.min_max_hz, minmax_width).c_str());
     mvprintw(
-      row, sep_three_x + 1, "%-*s", bandwidth_width,
+      row, sep_three_x + 1, "%-*s", missed_width,
+      truncate_text(missed_text, missed_width).c_str());
+    mvprintw(
+      row, sep_four_x + 1, "%-*s", recovery_width,
+      truncate_text(row_data.avg_recovery_time, recovery_width).c_str());
+    mvprintw(
+      row, sep_five_x + 1, "%-*s", bandwidth_width,
       truncate_text(row_data.bandwidth, bandwidth_width).c_str());
     if (text_color != 0) {
       attroff(COLOR_PAIR(text_color));
@@ -507,11 +529,15 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
       mvaddch(row, sep_one_x, '|');
       mvaddch(row, sep_two_x, '|');
       mvaddch(row, sep_three_x, '|');
+      mvaddch(row, sep_four_x, '|');
+      mvaddch(row, sep_five_x, '|');
       if (text_color != 0) {
         apply_role_chgat(row, left, topic_width, text_color);
         apply_role_chgat(row, sep_one_x + 1, avg_width, text_color);
         apply_role_chgat(row, sep_two_x + 1, minmax_width, text_color);
-        apply_role_chgat(row, sep_three_x + 1, bandwidth_width, text_color);
+        apply_role_chgat(row, sep_three_x + 1, missed_width, text_color);
+        apply_role_chgat(row, sep_four_x + 1, recovery_width, text_color);
+        apply_role_chgat(row, sep_five_x + 1, bandwidth_width, text_color);
       }
     }
   }

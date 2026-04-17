@@ -72,6 +72,73 @@ TEST_F(TopicMonitorBackendTest, FallsBackToCompatibleMixedPublisherProfile) {
   EXPECT_GE(subscription_qos.depth(), 20u);
 }
 
+TEST_F(TopicMonitorBackendTest, TopicRowsAddOutstandingMissesToTheCumulativeTotal) {
+  TopicMonitorBackend backend;
+
+  TopicEntry entry;
+  entry.name = "/monitored/topic";
+  entry.type = "geometry_msgs/msg/Twist";
+  entry.monitored = true;
+  entry.total_missed_messages = 3;
+  entry.has_last_message = true;
+  const auto now = TopicClock::now();
+  entry.last_message_time = now - std::chrono::milliseconds(750);
+  entry.intervals.push_back({now - std::chrono::seconds(2), 0.5});
+  entry.intervals.push_back({now - std::chrono::milliseconds(1250), 0.5});
+  backend.topics_.emplace(entry.name, entry);
+
+  const auto rows = backend.topic_rows_snapshot();
+
+  ASSERT_EQ(rows.size(), 1u);
+  EXPECT_TRUE(rows.front().has_expected_frequency);
+  EXPECT_EQ(rows.front().current_missed_messages, 1u);
+  EXPECT_EQ(rows.front().total_missed_messages, 4u);
+  EXPECT_TRUE(rows.front().stale);
+}
+
+TEST_F(TopicMonitorBackendTest, TopicRowsDoNotCountOutstandingMissesBeforeExpectedArrival) {
+  TopicMonitorBackend backend;
+
+  TopicEntry entry;
+  entry.name = "/steady/topic";
+  entry.type = "geometry_msgs/msg/Twist";
+  entry.monitored = true;
+  entry.total_missed_messages = 2;
+  entry.has_last_message = true;
+  const auto now = TopicClock::now();
+  entry.last_message_time = now - std::chrono::milliseconds(200);
+  entry.intervals.push_back({now - std::chrono::seconds(2), 0.5});
+  entry.intervals.push_back({now - std::chrono::milliseconds(1200), 0.5});
+  backend.topics_.emplace(entry.name, entry);
+
+  const auto rows = backend.topic_rows_snapshot();
+
+  ASSERT_EQ(rows.size(), 1u);
+  EXPECT_TRUE(rows.front().has_expected_frequency);
+  EXPECT_EQ(rows.front().current_missed_messages, 0u);
+  EXPECT_EQ(rows.front().total_missed_messages, 2u);
+  EXPECT_FALSE(rows.front().stale);
+}
+
+TEST_F(TopicMonitorBackendTest, TopicRowsShowAverageRecoveryDurationForRecoveredOutages) {
+  TopicMonitorBackend backend;
+
+  TopicEntry entry;
+  entry.name = "/recovering/topic";
+  entry.type = "geometry_msgs/msg/Twist";
+  entry.monitored = true;
+  entry.total_missed_messages = 5;
+  entry.recovery_duration_sum_seconds = 0.75;
+  entry.recovery_count = 3;
+  backend.topics_.emplace(entry.name, entry);
+
+  const auto rows = backend.topic_rows_snapshot();
+
+  ASSERT_EQ(rows.size(), 1u);
+  EXPECT_EQ(rows.front().total_missed_messages, 5u);
+  EXPECT_EQ(rows.front().avg_recovery_time, "250ms");
+}
+
 TEST_F(TopicMonitorBackendTest, FilteredLaunchOnlyKeepsAllowedTopicsAndStartsMonitoring) {
   auto source_node = std::make_shared<rclcpp::Node>("topic_monitor_filtered_source");
   auto allowed_publisher =
