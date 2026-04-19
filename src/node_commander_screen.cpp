@@ -2,13 +2,6 @@
 
 #include <ament_index_cpp/get_package_prefix.hpp>
 
-#include "ros2_console_tools/action_commander.hpp"
-#include "ros2_console_tools/diagnostics_viewer.hpp"
-#include "ros2_console_tools/log_viewer.hpp"
-#include "ros2_console_tools/topic_monitor.hpp"
-#include "ros2_console_tools/tf_monitor.hpp"
-#include "ros2_console_tools/urdf_inspector.hpp"
-
 #include <ncursesw/ncurses.h>
 
 #include <algorithm>
@@ -26,8 +19,6 @@
 #endif
 
 namespace ros2_console_tools {
-
-int run_parameter_commander_tool(const std::string & target_node, bool embedded_mode);
 
 namespace {
 
@@ -64,15 +55,16 @@ void resume_parent_screen() {
   timeout(100);
 }
 
-bool run_service_commander_subprocess(
-  const std::string & initial_node,
-  const std::string & initial_service,
+bool run_tool_subprocess(
+  const std::string & executable_name,
+  const std::vector<std::string> & extra_arguments,
   std::string * error)
 {
   std::string executable_path;
   try {
     executable_path =
-      ament_index_cpp::get_package_prefix("ros2_console_tools") + "/lib/ros2_console_tools/service_commander";
+      ament_index_cpp::get_package_prefix("ros2_console_tools") + "/lib/ros2_console_tools/" +
+      executable_name;
   } catch (const std::exception & exception) {
     if (error != nullptr) {
       *error = exception.what();
@@ -80,15 +72,8 @@ bool run_service_commander_subprocess(
     return false;
   }
 
-  std::vector<std::string> arguments{executable_path, "--embedded"};
-  if (!initial_node.empty()) {
-    arguments.push_back("--node");
-    arguments.push_back(initial_node);
-  }
-  if (!initial_service.empty()) {
-    arguments.push_back("--service");
-    arguments.push_back(initial_service);
-  }
+  std::vector<std::string> arguments{executable_path};
+  arguments.insert(arguments.end(), extra_arguments.begin(), extra_arguments.end());
 
   std::vector<char *> argv;
   argv.reserve(arguments.size() + 1);
@@ -128,14 +113,41 @@ bool run_service_commander_subprocess(
 
   if (error != nullptr) {
     if (WIFEXITED(child_status)) {
-      *error = "service_commander exited with code " + std::to_string(WEXITSTATUS(child_status));
+      *error = executable_name + " exited with code " + std::to_string(WEXITSTATUS(child_status));
     } else if (WIFSIGNALED(child_status)) {
-      *error = "service_commander terminated by signal " + std::to_string(WTERMSIG(child_status));
+      *error = executable_name + " terminated by signal " + std::to_string(WTERMSIG(child_status));
     } else {
-      *error = "service_commander terminated unexpectedly";
+      *error = executable_name + " terminated unexpectedly";
     }
   }
   return false;
+}
+
+bool run_embedded_tool_subprocess(
+  const std::string & executable_name,
+  const std::vector<std::string> & extra_arguments,
+  std::string * error = nullptr)
+{
+  std::vector<std::string> arguments{"--embedded"};
+  arguments.insert(arguments.end(), extra_arguments.begin(), extra_arguments.end());
+  return run_tool_subprocess(executable_name, arguments, error);
+}
+
+bool run_service_commander_subprocess(
+  const std::string & initial_node,
+  const std::string & initial_service,
+  std::string * error)
+{
+  std::vector<std::string> arguments;
+  if (!initial_node.empty()) {
+    arguments.push_back("--node");
+    arguments.push_back(initial_node);
+  }
+  if (!initial_service.empty()) {
+    arguments.push_back("--service");
+    arguments.push_back(initial_service);
+  }
+  return run_embedded_tool_subprocess("service_commander", arguments, error);
 }
 
 std::string make_help_popup_title() {
@@ -553,11 +565,12 @@ int NodeCommanderScreen::page_step() const {
 bool NodeCommanderScreen::launch_parameter_commander() {
   def_prog_mode();
   endwin();
-  (void)run_parameter_commander_tool("", true);
+  std::string error;
+  const bool ok = run_embedded_tool_subprocess("parameter_commander", {}, &error);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
-    backend_->status_line_ = "Returned from parameter_commander.";
+    backend_->status_line_ = ok ? "Returned from parameter_commander." : "parameter_commander failed: " + error;
   }
   return true;
 }
@@ -565,11 +578,12 @@ bool NodeCommanderScreen::launch_parameter_commander() {
 bool NodeCommanderScreen::launch_log_viewer() {
   def_prog_mode();
   endwin();
-  (void)run_log_viewer_tool(true);
+  std::string error;
+  const bool ok = run_embedded_tool_subprocess("log_viewer", {}, &error);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
-    backend_->status_line_ = "Returned from log_viewer.";
+    backend_->status_line_ = ok ? "Returned from log_viewer." : "log_viewer failed: " + error;
   }
   return true;
 }
@@ -605,11 +619,12 @@ bool NodeCommanderScreen::launch_service_commander() {
 bool NodeCommanderScreen::launch_action_commander() {
   def_prog_mode();
   endwin();
-  (void)run_action_commander_tool("", true);
+  std::string error;
+  const bool ok = run_embedded_tool_subprocess("action_commander", {}, &error);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
-    backend_->status_line_ = "Returned from action_commander.";
+    backend_->status_line_ = ok ? "Returned from action_commander." : "action_commander failed: " + error;
   }
   return true;
 }
@@ -617,11 +632,12 @@ bool NodeCommanderScreen::launch_action_commander() {
 bool NodeCommanderScreen::launch_topic_monitor() {
   def_prog_mode();
   endwin();
-  (void)run_topic_monitor_tool("", true);
+  std::string error;
+  const bool ok = run_embedded_tool_subprocess("topic_monitor", {}, &error);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
-    backend_->status_line_ = "Returned from topic_monitor.";
+    backend_->status_line_ = ok ? "Returned from topic_monitor." : "topic_monitor failed: " + error;
   }
   return true;
 }
@@ -629,11 +645,12 @@ bool NodeCommanderScreen::launch_topic_monitor() {
 bool NodeCommanderScreen::launch_tf_monitor() {
   def_prog_mode();
   endwin();
-  (void)run_tf_monitor_tool(true);
+  std::string error;
+  const bool ok = run_embedded_tool_subprocess("tf_monitor", {}, &error);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
-    backend_->status_line_ = "Returned from tf_monitor.";
+    backend_->status_line_ = ok ? "Returned from tf_monitor." : "tf_monitor failed: " + error;
   }
   return true;
 }
@@ -641,11 +658,12 @@ bool NodeCommanderScreen::launch_tf_monitor() {
 bool NodeCommanderScreen::launch_urdf_inspector() {
   def_prog_mode();
   endwin();
-  (void)run_urdf_inspector_tool("", true);
+  std::string error;
+  const bool ok = run_embedded_tool_subprocess("urdf_inspector", {}, &error);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
-    backend_->status_line_ = "Returned from urdf_inspector.";
+    backend_->status_line_ = ok ? "Returned from urdf_inspector." : "urdf_inspector failed: " + error;
   }
   return true;
 }
@@ -653,11 +671,12 @@ bool NodeCommanderScreen::launch_urdf_inspector() {
 bool NodeCommanderScreen::launch_diagnostics_viewer() {
   def_prog_mode();
   endwin();
-  (void)run_diagnostics_viewer_tool(true);
+  std::string error;
+  const bool ok = run_embedded_tool_subprocess("diagnostics_viewer", {}, &error);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
-    backend_->status_line_ = "Returned from diagnostics_viewer.";
+    backend_->status_line_ = ok ? "Returned from diagnostics_viewer." : "diagnostics_viewer failed: " + error;
   }
   return true;
 }
@@ -678,11 +697,14 @@ bool NodeCommanderScreen::launch_selected_node_parameters() {
 
   def_prog_mode();
   endwin();
-  (void)run_parameter_commander_tool(selected_node, true);
+  std::string error;
+  const bool ok = run_embedded_tool_subprocess("parameter_commander", {selected_node}, &error);
   resume_parent_screen();
   {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
-    backend_->status_line_ = "Returned from parameter_commander for " + selected_node + ".";
+    backend_->status_line_ = ok
+      ? "Returned from parameter_commander for " + selected_node + "."
+      : "parameter_commander failed: " + error;
   }
   return true;
 }
@@ -710,9 +732,11 @@ bool NodeCommanderScreen::launch_selected_detail_action() {
   endwin();
   std::string service_error;
   bool service_launch_ok = true;
+  std::string launch_error;
+  bool launch_ok = true;
   switch (line->action) {
     case NodeDetailAction::OpenParameters:
-      (void)run_parameter_commander_tool(line->target, true);
+      launch_ok = run_embedded_tool_subprocess("parameter_commander", {line->target}, &launch_error);
       break;
     case NodeDetailAction::OpenTopicMonitor:
       if (line->is_header) {
@@ -724,19 +748,18 @@ bool NodeCommanderScreen::launch_selected_detail_action() {
           return true;
         }
 
-        TopicMonitorLaunchOptions options;
-        options.allowed_topics = topic_targets;
-        options.embedded_mode = true;
-        options.monitor_allowed_topics_on_start = true;
-        (void)run_topic_monitor_tool(options);
+        std::vector<std::string> arguments{"--monitor-allowed"};
+        for (const auto & topic : topic_targets) {
+          arguments.push_back("--allowed-topic");
+          arguments.push_back(topic);
+        }
+        launch_ok = run_embedded_tool_subprocess("topic_monitor", arguments, &launch_error);
       } else {
-        TopicMonitorLaunchOptions options;
-        options.initial_topic = line->target;
-        options.allowed_topics.push_back(line->target);
-        options.embedded_mode = true;
-        options.open_initial_topic_detail = true;
-        options.exit_on_detail_escape = true;
-        (void)run_topic_monitor_tool(options);
+        launch_ok = run_embedded_tool_subprocess(
+          "topic_monitor",
+          {"--topic", line->target, "--allowed-topic", line->target, "--open-topic-detail",
+            "--exit-on-detail-escape"},
+          &launch_error);
       }
       break;
     case NodeDetailAction::OpenServiceCommander:
@@ -746,12 +769,14 @@ bool NodeCommanderScreen::launch_selected_detail_action() {
         &service_error);
       break;
     case NodeDetailAction::OpenLogViewer: {
-        LogViewerLaunchOptions options;
-        options.embedded_mode = true;
-        options.initial_live_source = primary_log_source_for_node(line->target);
-        options.live_source_aliases = log_source_candidates_for_node(line->target);
-        options.open_live_source_on_start = true;
-        (void)run_log_viewer_tool(options);
+        std::vector<std::string> arguments{
+          "--initial-live-source", primary_log_source_for_node(line->target),
+          "--open-live-source"};
+        for (const auto & alias : log_source_candidates_for_node(line->target)) {
+          arguments.push_back("--live-source-alias");
+          arguments.push_back(alias);
+        }
+        launch_ok = run_embedded_tool_subprocess("log_viewer", arguments, &launch_error);
       }
       break;
     case NodeDetailAction::None:
@@ -762,6 +787,8 @@ bool NodeCommanderScreen::launch_selected_detail_action() {
     std::lock_guard<std::mutex> lock(backend_->mutex_);
     if (line->action == NodeDetailAction::OpenServiceCommander && !service_launch_ok) {
       backend_->status_line_ = "service_commander failed: " + service_error;
+    } else if (!launch_ok) {
+      backend_->status_line_ = "Launch failed: " + launch_error;
     } else {
       backend_->status_line_ = "Returned to node_commander.";
     }

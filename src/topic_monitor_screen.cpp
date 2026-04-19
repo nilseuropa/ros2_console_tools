@@ -1,12 +1,15 @@
 #include "ros2_console_tools/topic_monitor.hpp"
 
-#include "ros2_console_tools/image_viewer.hpp"
-#include "ros2_console_tools/imu_viewer.hpp"
-#include "ros2_console_tools/joy_viewer.hpp"
-#include "ros2_console_tools/map_viewer.hpp"
+#include <ament_index_cpp/get_package_prefix.hpp>
 
 #include <ncursesw/ncurses.h>
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <sys/wait.h>
 #include <thread>
+#include <unistd.h>
 
 namespace ros2_console_tools {
 
@@ -62,6 +65,76 @@ using tui::SearchInputResult;
 using tui::start_search;
 using tui::theme_attr;
 using tui::truncate_text;
+
+bool run_visualizer_subprocess(
+  const std::string & executable_name,
+  const std::string & topic_name,
+  std::string * error)
+{
+  std::string executable_path;
+  try {
+    executable_path =
+      ament_index_cpp::get_package_prefix("ros2_console_tools") + "/lib/ros2_console_tools/" +
+      executable_name;
+  } catch (const std::exception & exception) {
+    if (error != nullptr) {
+      *error = exception.what();
+    }
+    return false;
+  }
+
+  std::vector<std::string> arguments{executable_path, "--embedded"};
+  if (!topic_name.empty()) {
+    arguments.push_back(topic_name);
+  }
+
+  std::vector<char *> argv;
+  argv.reserve(arguments.size() + 1);
+  for (auto & argument : arguments) {
+    argv.push_back(argument.data());
+  }
+  argv.push_back(nullptr);
+
+  const pid_t child_pid = fork();
+  if (child_pid == -1) {
+    if (error != nullptr) {
+      *error = std::strerror(errno);
+    }
+    return false;
+  }
+
+  if (child_pid == 0) {
+    execv(executable_path.c_str(), argv.data());
+    std::perror("execv");
+    _exit(127);
+  }
+
+  int child_status = 0;
+  while (waitpid(child_pid, &child_status, 0) == -1) {
+    if (errno == EINTR) {
+      continue;
+    }
+    if (error != nullptr) {
+      *error = std::strerror(errno);
+    }
+    return false;
+  }
+
+  if (WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0) {
+    return true;
+  }
+
+  if (error != nullptr) {
+    if (WIFEXITED(child_status)) {
+      *error = executable_name + " exited with code " + std::to_string(WEXITSTATUS(child_status));
+    } else if (WIFSIGNALED(child_status)) {
+      *error = executable_name + " terminated by signal " + std::to_string(WTERMSIG(child_status));
+    } else {
+      *error = executable_name + " terminated unexpectedly";
+    }
+  }
+  return false;
+}
 
 }  // namespace
 
@@ -327,29 +400,41 @@ bool TopicMonitorScreen::launch_selected_visualizer() {
 
   if (topic_type == "nav_msgs/msg/OccupancyGrid") {
     flushinp();
-    (void)run_map_viewer_tool(topic_name, true);
-    backend_->status_line_ = "Returned from map_viewer for " + topic_name + ".";
+    std::string error;
+    const bool ok = run_visualizer_subprocess("map_viewer", topic_name, &error);
+    backend_->status_line_ = ok
+      ? "Returned from map_viewer for " + topic_name + "."
+      : "map_viewer failed: " + error;
     return true;
   }
 
   if (topic_type == "sensor_msgs/msg/Image") {
     flushinp();
-    (void)run_image_viewer_tool(topic_name, true);
-    backend_->status_line_ = "Returned from image_viewer for " + topic_name + ".";
+    std::string error;
+    const bool ok = run_visualizer_subprocess("image_viewer", topic_name, &error);
+    backend_->status_line_ = ok
+      ? "Returned from image_viewer for " + topic_name + "."
+      : "image_viewer failed: " + error;
     return true;
   }
 
   if (topic_type == "sensor_msgs/msg/Joy") {
     flushinp();
-    (void)run_joy_viewer_tool(topic_name, true);
-    backend_->status_line_ = "Returned from joy_viewer for " + topic_name + ".";
+    std::string error;
+    const bool ok = run_visualizer_subprocess("joy_viewer", topic_name, &error);
+    backend_->status_line_ = ok
+      ? "Returned from joy_viewer for " + topic_name + "."
+      : "joy_viewer failed: " + error;
     return true;
   }
 
   if (topic_type == "sensor_msgs/msg/Imu") {
     flushinp();
-    (void)run_imu_viewer_tool(topic_name, true);
-    backend_->status_line_ = "Returned from imu_viewer for " + topic_name + ".";
+    std::string error;
+    const bool ok = run_visualizer_subprocess("imu_viewer", topic_name, &error);
+    backend_->status_line_ = ok
+      ? "Returned from imu_viewer for " + topic_name + "."
+      : "imu_viewer failed: " + error;
     return true;
   }
 
