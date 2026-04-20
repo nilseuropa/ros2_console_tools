@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -46,6 +47,8 @@ struct RenderGeometry {
   int width{1};
   int height{1};
   int cell_width{1};
+  int column_offset{0};
+  int row_offset{0};
 };
 
 enum ColorPairId {
@@ -209,19 +212,50 @@ RenderGeometry compute_render_geometry(
   const int cell_width = context == tui::TerminalContext::Ascii ? kAsciiCellWidth : kColorCellWidth;
   const int available_columns = std::max(cell_width, right - left - 1);
   const int available_rows = std::max(1, bottom - top - 1);
+  const int available_render_width = std::max(1, available_columns / cell_width);
+  const int available_render_height = available_rows;
 
-  int render_width = rotated_width == 0 ? 1 : static_cast<int>(rotated_width);
-  int render_height = rotated_height == 0 ? 1 : static_cast<int>(rotated_height);
-  render_width = std::min(render_width, std::max(1, available_columns / cell_width));
-  render_height = std::min(render_height, available_rows);
+  int max_render_width = std::min(
+    rotated_width == 0 ? 1 : static_cast<int>(rotated_width),
+    available_render_width);
+  int max_render_height = std::min(
+    rotated_height == 0 ? 1 : static_cast<int>(rotated_height),
+    available_render_height);
   if (max_width > 0) {
-    render_width = std::min(render_width, max_width);
+    max_render_width = std::min(max_render_width, max_width);
   }
   if (max_height > 0) {
-    render_height = std::min(render_height, max_height);
+    max_render_height = std::min(max_render_height, max_height);
+  }
+  max_render_width = std::max(1, max_render_width);
+  max_render_height = std::max(1, max_render_height);
+
+  constexpr double kCellHeightOverWidth = 2.0;
+  const double source_aspect =
+    rotated_height == 0 ? 1.0 : static_cast<double>(std::max<std::size_t>(1, rotated_width)) /
+    static_cast<double>(std::max<std::size_t>(1, rotated_height));
+  const double render_cell_aspect =
+    source_aspect * kCellHeightOverWidth / static_cast<double>(cell_width);
+
+  int render_width = max_render_width;
+  int render_height = std::max(1, static_cast<int>(std::lround(render_width / render_cell_aspect)));
+  if (render_height > max_render_height) {
+    render_height = max_render_height;
+    render_width = std::max(
+      1,
+      std::min(max_render_width, static_cast<int>(std::lround(render_height * render_cell_aspect))));
   }
 
-  return {std::max(1, render_width), std::max(1, render_height), cell_width};
+  const int used_columns = render_width * cell_width;
+  const int column_offset = std::max(0, (available_columns - used_columns) / 2);
+  const int row_offset = std::max(0, (available_rows - render_height) / 2);
+
+  return {
+    std::max(1, render_width),
+    std::max(1, render_height),
+    cell_width,
+    column_offset,
+    row_offset};
 }
 
 void maybe_replace_cell(AggregatedCell & target_cell, int8_t occupancy_value) {
@@ -471,13 +505,15 @@ void MapViewerScreen::draw_grid_view(
     static_cast<std::size_t>(geometry.width) * static_cast<std::size_t>(geometry.height));
   aggregate_cells(message, geometry, backend_->rotation_degrees_, aggregated_cells);
 
+  const int draw_left = left + 1 + geometry.column_offset;
+  const int draw_bottom = bottom - 1 - geometry.row_offset;
   for (int render_y = 0; render_y < geometry.height; ++render_y) {
-    const int row = bottom - 1 - render_y;
+    const int row = draw_bottom - render_y;
     if (row <= map_top || row >= bottom) {
       continue;
     }
-    int col = left + 1;
-    mvhline(row, col, ' ', std::max(0, right - left - 1));
+    mvhline(row, left + 1, ' ', std::max(0, right - left - 1));
+    int col = draw_left;
     for (int render_x = 0; render_x < geometry.width && col < right; ++render_x) {
       const auto index = static_cast<std::size_t>(render_y * geometry.width + render_x);
       const int8_t value = aggregated_cells[index].occupancy_value;
