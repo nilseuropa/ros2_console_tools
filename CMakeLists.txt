@@ -138,6 +138,31 @@ install(TARGETS imu_viewer_lib imu_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_library(laser_scan_viewer_lib
+  src/laser_scan_viewer_backend.cpp
+  src/laser_scan_viewer_screen.cpp
+  src/tui.cpp
+)
+ament_target_dependencies(laser_scan_viewer_lib
+  ament_index_cpp
+  rclcpp
+  sensor_msgs
+)
+target_include_directories(laser_scan_viewer_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(laser_scan_viewer_lib ${NCURSESW_LIBRARY})
+
+add_executable(laser_scan_viewer src/laser_scan_viewer.cpp)
+ament_target_dependencies(laser_scan_viewer
+  rclcpp
+  sensor_msgs
+)
+target_include_directories(laser_scan_viewer PRIVATE ${CURSES_INCLUDE_DIR} include)
+target_link_libraries(laser_scan_viewer laser_scan_viewer_lib)
+
+install(TARGETS laser_scan_viewer_lib laser_scan_viewer
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 add_library(parameter_commander_lib
   src/parameter_commander_backend.cpp
   src/parameter_commander_screen.cpp
@@ -173,7 +198,15 @@ ament_target_dependencies(topic_monitor_lib
   rosidl_typesupport_introspection_cpp
 )
 target_include_directories(topic_monitor_lib PUBLIC ${CURSES_INCLUDE_DIR} include)
-target_link_libraries(topic_monitor_lib ${NCURSESW_LIBRARY} map_viewer_lib image_viewer_lib joy_viewer_lib imu_viewer_lib)
+target_link_libraries(
+  topic_monitor_lib
+  ${NCURSESW_LIBRARY}
+  map_viewer_lib
+  image_viewer_lib
+  joy_viewer_lib
+  imu_viewer_lib
+  laser_scan_viewer_lib
+)
 
 add_executable(topic_monitor src/topic_monitor.cpp)
 ament_target_dependencies(topic_monitor
@@ -381,6 +414,7 @@ target_link_libraries(
   topic_monitor_lib
   joy_viewer_lib
   imu_viewer_lib
+  laser_scan_viewer_lib
   log_viewer_lib
   diagnostics_viewer_lib
   service_commander_lib
@@ -474,6 +508,21 @@ if(BUILD_TESTING)
     target_include_directories(image_viewer_backend_test PRIVATE ${CURSES_INCLUDE_DIR} include)
     target_link_libraries(image_viewer_backend_test
       image_viewer_lib
+    )
+  endif()
+
+  ament_add_gtest(laser_scan_viewer_backend_test
+    test/laser_scan_viewer_backend_test.cpp
+  )
+  if(TARGET laser_scan_viewer_backend_test)
+    ament_target_dependencies(laser_scan_viewer_backend_test
+      ament_index_cpp
+      rclcpp
+      sensor_msgs
+    )
+    target_include_directories(laser_scan_viewer_backend_test PRIVATE ${CURSES_INCLUDE_DIR} include)
+    target_link_libraries(laser_scan_viewer_backend_test
+      laser_scan_viewer_lib
     )
   endif()
 

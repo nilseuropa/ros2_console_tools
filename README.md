@@ -30,7 +30,7 @@ ros2 run ros2_console_tools topic_monitor
 | --- | --- | --- |
 | `node_commander` | Browse the live ROS 2 graph. | Node list, graph interface details, parameter service reachability, launcher hub for other ROS tools. |
 | `parameter_commander` | Inspect and edit parameters on a selected node. | Namespace-folded parameter tree, scalar and array editing, descriptor and constraint display. |
-| `topic_monitor` | Inspect topics and monitor live traffic. | Rate and bandwidth stats, decoded message view, topic search, embedded visualizers for map, image, joystick, and IMU topics. |
+| `topic_monitor` | Inspect topics and monitor live traffic. | Rate and bandwidth stats, decoded message view, topic search, embedded visualizers for map, image, joystick, IMU, and LaserScan topics. |
 | `service_commander` | Inspect and call ROS 2 services. | Generic introspection-based request/response view, scalar request editing, interactive calls. |
 | `action_commander` | Inspect ROS 2 actions. | Protocol endpoint breakdown, server/client node lists, action graph visibility. |
 | `log_viewer` | Read `/rosout` in the terminal. | Source filtering, severity filtering, text filter, detail popup, local source-code inspection when paths are available. |
@@ -46,6 +46,7 @@ ros2 run ros2_console_tools topic_monitor
 | `image_viewer` | Render `sensor_msgs/msg/Image` in the terminal. | Grayscale image view, zoom, pan, invert, render mode switching, frame freeze. |
 | `joy_viewer` | Visualize `sensor_msgs/msg/Joy` in the terminal. | Axis bars, button states, generic stick pads, frame freeze. |
 | `imu_viewer` | Visualize `sensor_msgs/msg/Imu` in the terminal. | Angular velocity and acceleration bars, orientation readout, orientation-derived tilt, covariance state. |
+| `laser_scan_viewer` | Visualize `sensor_msgs/msg/LaserScan` in the terminal. | Top-down polar scan plot, range zoom, invalid range markers, frame freeze. |
 
 ## Common Interaction Model
 
@@ -89,7 +90,7 @@ ROS-backed tools use `rclcpp::Node` backends for subscriptions, clients, graph q
 ## Notable Integration Points
 
 - `node_commander` is the main ROS entry point and launcher hub.
-- `topic_monitor` can open `map_viewer` for occupancy grids, `image_viewer` for image topics, and `joy_viewer` for joystick topics.
+- `topic_monitor` can open `map_viewer` for occupancy grids, `image_viewer` for image topics, `joy_viewer` for joystick topics, `imu_viewer` for IMU topics, and `laser_scan_viewer` for LaserScan topics.
 
 ## Notes
 
