@@ -46,6 +46,12 @@ struct TopicMonitorLaunchOptions {
 int run_topic_monitor_tool(const TopicMonitorLaunchOptions & options);
 int run_topic_monitor_tool(const std::string & initial_topic = "", bool embedded_mode = false);
 
+enum class TopicPlotRenderMode {
+  Auto = 0,
+  Braille = 1,
+  Points = 2,
+};
+
 using TopicClock = std::chrono::steady_clock;
 using MessageMember = rosidl_typesupport_introspection_cpp::MessageMember;
 using MessageMembers = rosidl_typesupport_introspection_cpp::MessageMembers;
@@ -348,6 +354,7 @@ private:
   std::string plot_topic_name_;
   std::string plot_field_name_;
   std::string plot_field_path_;
+  TopicPlotRenderMode plot_render_mode_{TopicPlotRenderMode::Auto};
   tui::TerminalPane terminal_pane_;
 };
 

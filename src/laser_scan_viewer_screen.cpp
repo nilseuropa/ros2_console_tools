@@ -8,6 +8,7 @@
 #include <limits>
 #include <sstream>
 #include <thread>
+#include <vector>
 
 namespace ros2_console_tools {
 
@@ -35,6 +36,32 @@ constexpr double kPi = 3.14159265358979323846;
 
 std::string glyph_or_ascii(const char * unicode_glyph, const char * ascii_glyph) {
   return terminal_context() == tui::TerminalContext::Ascii ? ascii_glyph : unicode_glyph;
+}
+
+LaserScanViewerRenderMode effective_render_mode(
+  LaserScanViewerRenderMode mode, tui::TerminalContext context)
+{
+  if (mode == LaserScanViewerRenderMode::Auto) {
+    return context == tui::TerminalContext::Ascii
+      ? LaserScanViewerRenderMode::Points
+      : LaserScanViewerRenderMode::Braille;
+  }
+  if (context == tui::TerminalContext::Ascii && mode == LaserScanViewerRenderMode::Braille) {
+    return LaserScanViewerRenderMode::Points;
+  }
+  return mode;
+}
+
+std::string render_mode_label(LaserScanViewerRenderMode mode, tui::TerminalContext context) {
+  switch (mode) {
+    case LaserScanViewerRenderMode::Braille:
+      return context == tui::TerminalContext::Ascii ? "braille-points" : "braille";
+    case LaserScanViewerRenderMode::Points:
+      return "points";
+    case LaserScanViewerRenderMode::Auto:
+    default:
+      return context == tui::TerminalContext::Ascii ? "auto-points" : "auto-braille";
+  }
 }
 
 std::string format_age(const LaserScanFrame & frame) {
@@ -218,6 +245,11 @@ bool LaserScanViewerScreen::handle_key(int key) {
         status_line_ = "Live view restored.";
       }
       return true;
+    case 'm':
+    case 'M':
+      render_mode_ = static_cast<LaserScanViewerRenderMode>((static_cast<int>(render_mode_) + 1) % 3);
+      status_line_ = "Render mode: " + render_mode_label(render_mode_, terminal_context()) + ".";
+      return true;
     default:
       return true;
   }
@@ -245,6 +277,8 @@ void LaserScanViewerScreen::draw_scan_view(
 {
   const int width = right - left + 1;
   const LaserScanStats stats = compute_laser_scan_stats(frame);
+  const auto context = terminal_context();
+  const auto effective_mode = effective_render_mode(render_mode_, context);
 
   attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, "LaserScan");
@@ -258,6 +292,7 @@ void LaserScanViewerScreen::draw_scan_view(
               << " valid=" << stats.valid_count
               << " span=" << format_float(angle_span_degrees(frame), 1) << "deg"
               << " zoom=" << std::fixed << std::setprecision(1) << zoom_factor_ << 'x'
+              << " mode=" << render_mode_label(render_mode_, context)
               << (frozen_ ? " frozen" : "");
   mvprintw(top + 1, left, "%-*s", width, truncate_text(header_line.str(), width).c_str());
 
@@ -291,41 +326,114 @@ void LaserScanViewerScreen::draw_scan_view(
     std::max(1.0, static_cast<double>(inner_height - 1) * cell_height_over_width / 2.0);
   const double radius_cells = std::min(horizontal_limit_cells, vertical_limit_cells);
 
-  for (std::size_t index = 0; index < frame.ranges.size(); ++index) {
-    const float raw_range = frame.ranges[index];
-    const bool valid = range_is_valid(raw_range, frame);
-    if (!valid && !show_invalid_) {
-      continue;
+  if (effective_mode == LaserScanViewerRenderMode::Braille) {
+    std::vector<uint8_t> valid_cells(
+      static_cast<std::size_t>(inner_width) * static_cast<std::size_t>(inner_height));
+    std::vector<uint8_t> invalid_cells(valid_cells.size());
+    const int virtual_width = std::max(1, inner_width * 2);
+    const int virtual_height = std::max(1, inner_height * 4);
+    const double virtual_center_column = static_cast<double>(virtual_width - 1) / 2.0;
+    const double virtual_center_row = static_cast<double>(virtual_height - 1) / 2.0;
+    const double virtual_radius =
+      std::min(virtual_center_column, virtual_center_row);
+
+    for (std::size_t index = 0; index < frame.ranges.size(); ++index) {
+      const float raw_range = frame.ranges[index];
+      const bool valid = range_is_valid(raw_range, frame);
+      if (!valid && !show_invalid_) {
+        continue;
+      }
+
+      const double range = valid ? static_cast<double>(raw_range) : radius;
+      if (valid && range > radius) {
+        continue;
+      }
+      const double angle =
+        static_cast<double>(frame.angle_min) + static_cast<double>(index) * static_cast<double>(frame.angle_increment);
+      const double normalized = std::clamp(range / radius, 0.0, 1.0);
+      const double forward = std::cos(angle) * normalized;
+      const double leftward = std::sin(angle) * normalized;
+      const int virtual_column = std::clamp(
+        static_cast<int>(std::lround(virtual_center_column + leftward * virtual_radius)),
+        0,
+        virtual_width - 1);
+      const int virtual_row = std::clamp(
+        static_cast<int>(std::lround(virtual_center_row + forward * virtual_radius)),
+        0,
+        virtual_height - 1);
+      tui::add_braille_dot(
+        valid ? valid_cells : invalid_cells,
+        inner_width,
+        inner_height,
+        virtual_column,
+        virtual_row);
     }
 
-    const double range = valid ? static_cast<double>(raw_range) : radius;
-    if (valid && range > radius) {
-      continue;
+    attron(theme_attr(kColorPositive));
+    for (int row_offset = 0; row_offset < inner_height; ++row_offset) {
+      for (int column_offset = 0; column_offset < inner_width; ++column_offset) {
+        const auto cell_index = static_cast<std::size_t>(row_offset * inner_width + column_offset);
+        if (valid_cells[cell_index] != 0) {
+          mvaddstr(
+            inner_top + row_offset,
+            inner_left + column_offset,
+            tui::braille_glyph(valid_cells[cell_index]).c_str());
+        }
+      }
     }
-    const double angle =
-      static_cast<double>(frame.angle_min) + static_cast<double>(index) * static_cast<double>(frame.angle_increment);
-    const double normalized = std::clamp(range / radius, 0.0, 1.0);
-    const double forward = std::cos(angle) * normalized;
-    const double leftward = std::sin(angle) * normalized;
-    const int column =
-      std::clamp(
-        center_column + static_cast<int>(std::lround(leftward * radius_cells)),
-        inner_left,
-        inner_right);
-    const int row =
-      std::clamp(
-        center_row + static_cast<int>(std::lround(forward * radius_cells / cell_height_over_width)),
-        inner_top,
-        inner_bottom);
+    attroff(theme_attr(kColorPositive));
 
-    if (valid) {
-      attron(theme_attr(kColorPositive));
-      mvaddstr(row, column, glyph_or_ascii("•", "*").c_str());
-      attroff(theme_attr(kColorPositive));
-    } else {
-      attron(theme_attr(kColorWarn));
-      mvaddstr(row, column, glyph_or_ascii("×", "x").c_str());
-      attroff(theme_attr(kColorWarn));
+    attron(theme_attr(kColorWarn));
+    for (int row_offset = 0; row_offset < inner_height; ++row_offset) {
+      for (int column_offset = 0; column_offset < inner_width; ++column_offset) {
+        const auto cell_index = static_cast<std::size_t>(row_offset * inner_width + column_offset);
+        if (invalid_cells[cell_index] != 0) {
+          const uint8_t merged_mask = static_cast<uint8_t>(invalid_cells[cell_index] | valid_cells[cell_index]);
+          mvaddstr(
+            inner_top + row_offset,
+            inner_left + column_offset,
+            tui::braille_glyph(merged_mask).c_str());
+        }
+      }
+    }
+    attroff(theme_attr(kColorWarn));
+  } else {
+    for (std::size_t index = 0; index < frame.ranges.size(); ++index) {
+      const float raw_range = frame.ranges[index];
+      const bool valid = range_is_valid(raw_range, frame);
+      if (!valid && !show_invalid_) {
+        continue;
+      }
+
+      const double range = valid ? static_cast<double>(raw_range) : radius;
+      if (valid && range > radius) {
+        continue;
+      }
+      const double angle =
+        static_cast<double>(frame.angle_min) + static_cast<double>(index) * static_cast<double>(frame.angle_increment);
+      const double normalized = std::clamp(range / radius, 0.0, 1.0);
+      const double forward = std::cos(angle) * normalized;
+      const double leftward = std::sin(angle) * normalized;
+      const int column =
+        std::clamp(
+          center_column + static_cast<int>(std::lround(leftward * radius_cells)),
+          inner_left,
+          inner_right);
+      const int row =
+        std::clamp(
+          center_row + static_cast<int>(std::lround(forward * radius_cells / cell_height_over_width)),
+          inner_top,
+          inner_bottom);
+
+      if (valid) {
+        attron(theme_attr(kColorPositive));
+        mvaddstr(row, column, glyph_or_ascii("•", "*").c_str());
+        attroff(theme_attr(kColorPositive));
+      } else {
+        attron(theme_attr(kColorWarn));
+        mvaddstr(row, column, glyph_or_ascii("×", "x").c_str());
+        attroff(theme_attr(kColorWarn));
+      }
     }
   }
 
@@ -394,8 +502,8 @@ void LaserScanViewerScreen::draw_help_line(int row, int columns) const {
     row,
     columns,
     embedded_mode_
-    ? "+/- Range Zoom  R Reset  I Invalids  F Freeze  Esc Return  F10 Exit"
-    : "+/- Range Zoom  R Reset  I Invalids  F Freeze  Esc Exit  F10 Exit");
+    ? "+/- Range Zoom  R Reset  I Invalids  M Mode  F Freeze  Esc Return  F10 Exit"
+    : "+/- Range Zoom  R Reset  I Invalids  M Mode  F Freeze  Esc Exit  F10 Exit");
 }
 
 void LaserScanViewerScreen::draw() {

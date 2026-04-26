@@ -4,8 +4,11 @@
 #include <ncursesw/ncurses.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <iomanip>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <thread>
@@ -26,6 +29,41 @@ struct RenderGeometry {
   double window_height{1.0};
   double offset_x{0.0};
   double offset_y{0.0};
+};
+
+struct RgbColor {
+  uint8_t red{0};
+  uint8_t green{0};
+  uint8_t blue{0};
+};
+
+struct ImageSample {
+  uint8_t gray{0};
+  RgbColor color{};
+};
+
+struct RgbAccumulator {
+  unsigned int red{0};
+  unsigned int green{0};
+  unsigned int blue{0};
+  unsigned int count{0};
+
+  void add(RgbColor color) {
+    red += color.red;
+    green += color.green;
+    blue += color.blue;
+    ++count;
+  }
+
+  RgbColor average() const {
+    if (count == 0) {
+      return {};
+    }
+    return {
+      static_cast<uint8_t>(red / count),
+      static_cast<uint8_t>(green / count),
+      static_cast<uint8_t>(blue / count)};
+  }
 };
 
 using tui::Session;
@@ -76,10 +114,12 @@ std::string render_mode_label(
   ImageViewerRenderMode mode, tui::TerminalContext context)
 {
   switch (mode) {
+    case ImageViewerRenderMode::Braille:
+      return context == tui::TerminalContext::Ascii ? "braille-ascii" : "braille";
     case ImageViewerRenderMode::Ascii:
       return "ascii";
     case ImageViewerRenderMode::Shade:
-      return "shade";
+      return context == tui::TerminalContext::Ascii ? "shade-ascii" : "shade";
     case ImageViewerRenderMode::Auto:
     default:
       return context == tui::TerminalContext::Ascii ? "auto-ascii" : "auto-shade";
@@ -136,13 +176,71 @@ RenderGeometry compute_render_geometry(
   return {render_width, render_height, window_width, window_height, offset_x, offset_y};
 }
 
-uint8_t sample_grayscale(
-  const ImageFrame & frame, const RenderGeometry & geometry, int render_x, int render_y)
+RenderGeometry compute_braille_render_geometry(
+  int inner_width,
+  int inner_height,
+  const ImageFrame & frame,
+  double zoom_factor,
+  int pan_x,
+  int pan_y)
+{
+  RenderGeometry geometry =
+    compute_render_geometry(inner_width, inner_height, frame, zoom_factor, pan_x, pan_y);
+
+  const double source_aspect = geometry.window_width / geometry.window_height;
+  const double available_virtual_width = std::max(1.0, static_cast<double>(inner_width * 2));
+  const double available_virtual_height = std::max(1.0, static_cast<double>(inner_height * 4));
+  const double available_aspect = available_virtual_width / available_virtual_height;
+
+  int virtual_width = inner_width * 2;
+  int virtual_height = inner_height * 4;
+  if (source_aspect > available_aspect) {
+    virtual_width = inner_width * 2;
+    virtual_height = std::max(
+      1,
+      std::min(
+        inner_height * 4,
+        static_cast<int>(std::lround(static_cast<double>(virtual_width) / source_aspect))));
+  } else {
+    virtual_height = inner_height * 4;
+    virtual_width = std::max(
+      1,
+      std::min(
+        inner_width * 2,
+        static_cast<int>(std::lround(static_cast<double>(virtual_height) * source_aspect))));
+  }
+
+  geometry.width = std::max(1, std::min(inner_width, (virtual_width + 1) / 2));
+  geometry.height = std::max(1, std::min(inner_height, (virtual_height + 3) / 4));
+  return geometry;
+}
+
+ImageViewerRenderMode effective_render_mode(
+  ImageViewerRenderMode mode, tui::TerminalContext context)
+{
+  if (mode == ImageViewerRenderMode::Auto) {
+    return context == tui::TerminalContext::Ascii
+      ? ImageViewerRenderMode::Ascii
+      : ImageViewerRenderMode::Shade;
+  }
+  if (context == tui::TerminalContext::Ascii && mode != ImageViewerRenderMode::Ascii) {
+    return ImageViewerRenderMode::Ascii;
+  }
+  return mode;
+}
+
+ImageSample sample_image(
+  const ImageFrame & frame,
+  const RenderGeometry & geometry,
+  int render_x,
+  int render_y,
+  int render_width,
+  int render_height)
 {
   const double normalized_x =
-    geometry.width <= 1 ? 0.0 : static_cast<double>(render_x) / static_cast<double>(geometry.width - 1);
+    render_width <= 1 ? 0.0 : static_cast<double>(render_x) / static_cast<double>(render_width - 1);
   const double normalized_y =
-    geometry.height <= 1 ? 0.0 : static_cast<double>(render_y) / static_cast<double>(geometry.height - 1);
+    render_height <= 1 ? 0.0 : static_cast<double>(render_y) / static_cast<double>(render_height - 1);
   const int source_x = std::clamp(
     static_cast<int>(std::lround(geometry.offset_x + normalized_x * std::max(0.0, geometry.window_width - 1.0))),
     0,
@@ -151,7 +249,92 @@ uint8_t sample_grayscale(
     static_cast<int>(std::lround(geometry.offset_y + normalized_y * std::max(0.0, geometry.window_height - 1.0))),
     0,
     std::max(0, static_cast<int>(frame.height) - 1));
-  return frame.gray8[static_cast<std::size_t>(source_y) * frame.width + static_cast<std::size_t>(source_x)];
+  const auto source_index =
+    static_cast<std::size_t>(source_y) * frame.width + static_cast<std::size_t>(source_x);
+  const uint8_t gray = frame.gray8[source_index];
+  if (!frame.has_color || frame.rgb8.size() < source_index * 3u + 3u) {
+    return {gray, {gray, gray, gray}};
+  }
+  const auto color_index = source_index * 3u;
+  return {
+    gray,
+    {
+      frame.rgb8[color_index],
+      frame.rgb8[color_index + 1u],
+      frame.rgb8[color_index + 2u]}};
+}
+
+uint8_t braille_dither_threshold(int subcolumn, int subrow) {
+  static constexpr uint8_t order[4][2] = {
+    {0, 4},
+    {6, 2},
+    {3, 7},
+    {5, 1},
+  };
+  return static_cast<uint8_t>((static_cast<unsigned int>(order[subrow][subcolumn]) + 1u) * 255u / 9u);
+}
+
+ImageSample maybe_invert_sample(ImageSample sample, bool invert) {
+  if (!invert) {
+    return sample;
+  }
+  sample.gray = static_cast<uint8_t>(255u - sample.gray);
+  sample.color.red = static_cast<uint8_t>(255u - sample.color.red);
+  sample.color.green = static_cast<uint8_t>(255u - sample.color.green);
+  sample.color.blue = static_cast<uint8_t>(255u - sample.color.blue);
+  return sample;
+}
+
+short nearest_basic_color(RgbColor color) {
+  struct BasicColor {
+    short index;
+    int red;
+    int green;
+    int blue;
+  };
+  static constexpr std::array<BasicColor, 8> colors = {{
+    {COLOR_BLACK, 0, 0, 0},
+    {COLOR_RED, 255, 0, 0},
+    {COLOR_GREEN, 0, 255, 0},
+    {COLOR_YELLOW, 255, 255, 0},
+    {COLOR_BLUE, 0, 0, 255},
+    {COLOR_MAGENTA, 255, 0, 255},
+    {COLOR_CYAN, 0, 255, 255},
+    {COLOR_WHITE, 255, 255, 255},
+  }};
+
+  short best_index = COLOR_WHITE;
+  int best_distance = std::numeric_limits<int>::max();
+  for (const auto & candidate : colors) {
+    const int red_delta = static_cast<int>(color.red) - candidate.red;
+    const int green_delta = static_cast<int>(color.green) - candidate.green;
+    const int blue_delta = static_cast<int>(color.blue) - candidate.blue;
+    const int distance =
+      red_delta * red_delta + green_delta * green_delta + blue_delta * blue_delta;
+    if (distance < best_distance) {
+      best_distance = distance;
+      best_index = candidate.index;
+    }
+  }
+  return best_index;
+}
+
+short terminal_color_index(RgbColor color) {
+  if (COLORS >= 256) {
+    const int red = std::clamp((static_cast<int>(color.red) * 5 + 127) / 255, 0, 5);
+    const int green = std::clamp((static_cast<int>(color.green) * 5 + 127) / 255, 0, 5);
+    const int blue = std::clamp((static_cast<int>(color.blue) * 5 + 127) / 255, 0, 5);
+    return static_cast<short>(16 + 36 * red + 6 * green + blue);
+  }
+  return nearest_basic_color(color);
+}
+
+int image_color_attr(const ImageFrame & frame, bool color_enabled, RgbColor color) {
+  if (!color_enabled || !frame.has_color || !has_colors()) {
+    return A_NORMAL;
+  }
+  const int pair = tui::dynamic_color_pair(terminal_color_index(color), -1);
+  return pair == 0 ? A_NORMAL : COLOR_PAIR(pair);
 }
 
 }  // namespace
@@ -266,9 +449,14 @@ bool ImageViewerScreen::handle_key(int key) {
       invert_grayscale_ = !invert_grayscale_;
       status_line_ = invert_grayscale_ ? "Grayscale inverted." : "Grayscale restored.";
       return true;
+    case 'c':
+    case 'C':
+      color_enabled_ = !color_enabled_;
+      status_line_ = color_enabled_ ? "Image color enabled." : "Image color disabled.";
+      return true;
     case 'm':
     case 'M':
-      render_mode_ = static_cast<ImageViewerRenderMode>((static_cast<int>(render_mode_) + 1) % 3);
+      render_mode_ = static_cast<ImageViewerRenderMode>((static_cast<int>(render_mode_) + 1) % 4);
       status_line_ = "Render mode: " + render_mode_label(render_mode_, terminal_context()) + ".";
       return true;
     case 'f':
@@ -343,10 +531,7 @@ void ImageViewerScreen::draw_image_view(
 {
   const int width = right - left + 1;
   const auto context = terminal_context();
-  const auto effective_mode =
-    render_mode_ == ImageViewerRenderMode::Auto
-    ? (context == tui::TerminalContext::Ascii ? ImageViewerRenderMode::Ascii : ImageViewerRenderMode::Shade)
-    : render_mode_;
+  const auto effective_mode = effective_render_mode(render_mode_, context);
 
   attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, "Image");
@@ -358,7 +543,8 @@ void ImageViewerScreen::draw_image_view(
               << " age=" << format_age(frame.stamp, *backend_->get_clock())
               << " src=" << frame.width << 'x' << frame.height
               << " enc=" << frame.source_encoding
-              << " mode=" << render_mode_label(effective_mode, context)
+              << (frame.has_color ? (color_enabled_ ? " color=on" : " color=off") : " mono")
+              << " mode=" << render_mode_label(render_mode_, context)
               << " zoom=" << std::fixed << std::setprecision(1) << zoom_factor_ << 'x'
               << (frozen_ ? " frozen" : "");
   mvprintw(top + 1, left, "%-*s", width, truncate_text(header_line.str(), width).c_str());
@@ -378,9 +564,60 @@ void ImageViewerScreen::draw_image_view(
   }
 
   const RenderGeometry geometry =
-    compute_render_geometry(inner_width, inner_height, frame, zoom_factor_, pan_x_, pan_y_);
+    effective_mode == ImageViewerRenderMode::Braille
+    ? compute_braille_render_geometry(inner_width, inner_height, frame, zoom_factor_, pan_x_, pan_y_)
+    : compute_render_geometry(inner_width, inner_height, frame, zoom_factor_, pan_x_, pan_y_);
   const int draw_left = inner_left + std::max(0, (inner_width - geometry.width) / 2);
   const int draw_top = inner_top + std::max(0, (inner_height - geometry.height) / 2);
+
+  if (effective_mode == ImageViewerRenderMode::Braille) {
+    const int virtual_width = geometry.width * 2;
+    const int virtual_height = geometry.height * 4;
+    for (int render_y = 0; render_y < geometry.height; ++render_y) {
+      const int row = draw_top + render_y;
+      if (row >= bottom) {
+        break;
+      }
+      for (int render_x = 0; render_x < geometry.width; ++render_x) {
+        const int column = draw_left + render_x;
+        if (column >= right) {
+          break;
+        }
+        uint8_t dot_mask = 0;
+        RgbAccumulator color_accumulator;
+        for (int subrow = 0; subrow < 4; ++subrow) {
+          for (int subcolumn = 0; subcolumn < 2; ++subcolumn) {
+            const ImageSample sample = maybe_invert_sample(
+              sample_image(
+                frame,
+                geometry,
+                render_x * 2 + subcolumn,
+                render_y * 4 + subrow,
+                virtual_width,
+                virtual_height),
+              invert_grayscale_);
+            if (sample.gray > braille_dither_threshold(subcolumn, subrow)) {
+              dot_mask |= tui::braille_dot_mask(subcolumn, subrow);
+              color_accumulator.add(sample.color);
+            }
+          }
+        }
+        if (dot_mask == 0) {
+          mvaddstr(row, column, " ");
+          continue;
+        }
+        const int color_attr = image_color_attr(frame, color_enabled_, color_accumulator.average());
+        if (color_attr != A_NORMAL) {
+          attron(color_attr);
+        }
+        mvaddstr(row, column, tui::braille_glyph(dot_mask).c_str());
+        if (color_attr != A_NORMAL) {
+          attroff(color_attr);
+        }
+      }
+    }
+    return;
+  }
 
   for (int render_y = 0; render_y < geometry.height; ++render_y) {
     const int row = draw_top + render_y;
@@ -392,11 +629,17 @@ void ImageViewerScreen::draw_image_view(
       if (column >= right) {
         break;
       }
-      uint8_t value = sample_grayscale(frame, geometry, render_x, render_y);
-      if (invert_grayscale_) {
-        value = static_cast<uint8_t>(255u - value);
+      const ImageSample sample = maybe_invert_sample(
+        sample_image(frame, geometry, render_x, render_y, geometry.width, geometry.height),
+        invert_grayscale_);
+      const int color_attr = image_color_attr(frame, color_enabled_, sample.color);
+      if (color_attr != A_NORMAL) {
+        attron(color_attr);
       }
-      mvaddstr(row, column, intensity_glyph(value, effective_mode, context));
+      mvaddstr(row, column, intensity_glyph(sample.gray, effective_mode, context));
+      if (color_attr != A_NORMAL) {
+        attroff(color_attr);
+      }
     }
   }
 }
@@ -410,8 +653,8 @@ void ImageViewerScreen::draw_help_line(int row, int columns) const {
     row,
     columns,
     embedded_mode_
-    ? "Arrows Pan  +/- Zoom  R Reset  I Invert  M Mode  F Freeze  Esc Return  F10 Exit"
-    : "Arrows Pan  +/- Zoom  R Reset  I Invert  M Mode  F Freeze  Esc Exit  F10 Exit");
+    ? "Arrows Pan  +/- Zoom  R Reset  I Invert  C Color  M Mode  F Freeze  Esc Return  F10 Exit"
+    : "Arrows Pan  +/- Zoom  R Reset  I Invert  C Color  M Mode  F Freeze  Esc Exit  F10 Exit");
 }
 
 void ImageViewerScreen::draw() {

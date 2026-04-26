@@ -17,6 +17,12 @@ namespace ros2_console_tools {
 
 int run_laser_scan_viewer_tool(const std::string & topic = "", bool embedded_mode = false);
 
+enum class LaserScanViewerRenderMode {
+  Auto = 0,
+  Braille = 1,
+  Points = 2,
+};
+
 using LaserScanViewerClock = std::chrono::steady_clock;
 
 struct LaserScanFrame {
@@ -89,6 +95,7 @@ private:
   double zoom_factor_{1.0};
   bool frozen_{false};
   bool show_invalid_{false};
+  LaserScanViewerRenderMode render_mode_{LaserScanViewerRenderMode::Auto};
   std::shared_ptr<const LaserScanFrame> frozen_frame_;
   std::string status_line_{"Waiting for LaserScan messages..."};
 };

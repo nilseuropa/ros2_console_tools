@@ -18,6 +18,19 @@ uint8_t luma_from_rgb(uint8_t red, uint8_t green, uint8_t blue) {
   return static_cast<uint8_t>((299u * red + 587u * green + 114u * blue + 500u) / 1000u);
 }
 
+uint8_t clamp_u8(int value) {
+  return static_cast<uint8_t>(std::clamp(value, 0, 255));
+}
+
+void yuv_to_rgb(uint8_t y, uint8_t u, uint8_t v, uint8_t & red, uint8_t & green, uint8_t & blue) {
+  const int c = static_cast<int>(y) - 16;
+  const int d = static_cast<int>(u) - 128;
+  const int e = static_cast<int>(v) - 128;
+  red = clamp_u8((298 * c + 409 * e + 128) >> 8);
+  green = clamp_u8((298 * c - 100 * d - 208 * e + 128) >> 8);
+  blue = clamp_u8((298 * c + 516 * d + 128) >> 8);
+}
+
 }  // namespace
 
 ImageViewerBackend::ImageViewerBackend(const std::string & topic)
@@ -133,37 +146,60 @@ bool ImageViewerBackend::decode_to_frame(
   }
 
   frame.gray8.resize(static_cast<std::size_t>(message.width) * message.height);
+  frame.has_color = layout != PixelLayout::Mono;
+  if (frame.has_color) {
+    frame.rgb8.resize(static_cast<std::size_t>(message.width) * message.height * 3u);
+  }
   for (uint32_t row = 0; row < message.height; ++row) {
     const std::size_t row_offset = static_cast<std::size_t>(row) * message.step;
     for (uint32_t column = 0; column < message.width; ++column) {
       const std::size_t src = row_offset + static_cast<std::size_t>(column) * channels;
       const std::size_t dst = static_cast<std::size_t>(row) * message.width + column;
+      const std::size_t color_dst = dst * 3u;
+      uint8_t red = 0;
+      uint8_t green = 0;
+      uint8_t blue = 0;
       switch (layout) {
         case PixelLayout::Mono:
           frame.gray8[dst] = message.data[src];
           break;
         case PixelLayout::Rgb:
-          frame.gray8[dst] = luma_from_rgb(
-            message.data[src], message.data[src + 1], message.data[src + 2]);
+          red = message.data[src];
+          green = message.data[src + 1];
+          blue = message.data[src + 2];
+          frame.gray8[dst] = luma_from_rgb(red, green, blue);
           break;
         case PixelLayout::Bgr:
-          frame.gray8[dst] = luma_from_rgb(
-            message.data[src + 2], message.data[src + 1], message.data[src]);
+          red = message.data[src + 2];
+          green = message.data[src + 1];
+          blue = message.data[src];
+          frame.gray8[dst] = luma_from_rgb(red, green, blue);
           break;
         case PixelLayout::Rgba:
-          frame.gray8[dst] = luma_from_rgb(
-            message.data[src], message.data[src + 1], message.data[src + 2]);
+          red = message.data[src];
+          green = message.data[src + 1];
+          blue = message.data[src + 2];
+          frame.gray8[dst] = luma_from_rgb(red, green, blue);
           break;
         case PixelLayout::Bgra:
-          frame.gray8[dst] = luma_from_rgb(
-            message.data[src + 2], message.data[src + 1], message.data[src]);
+          red = message.data[src + 2];
+          green = message.data[src + 1];
+          blue = message.data[src];
+          frame.gray8[dst] = luma_from_rgb(red, green, blue);
           break;
         case PixelLayout::Yuy2: {
           const std::size_t pair_src =
             row_offset + (static_cast<std::size_t>(column) / 2u) * 4u + ((column % 2u) == 0u ? 0u : 2u);
           frame.gray8[dst] = message.data[pair_src];
+          const std::size_t pair_base = row_offset + (static_cast<std::size_t>(column) / 2u) * 4u;
+          yuv_to_rgb(message.data[pair_src], message.data[pair_base + 1], message.data[pair_base + 3], red, green, blue);
           break;
         }
+      }
+      if (frame.has_color) {
+        frame.rgb8[color_dst] = red;
+        frame.rgb8[color_dst + 1] = green;
+        frame.rgb8[color_dst + 2] = blue;
       }
     }
   }

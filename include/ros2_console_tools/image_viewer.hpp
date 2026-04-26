@@ -25,12 +25,15 @@ struct ImageFrame {
   builtin_interfaces::msg::Time stamp;
   std::string frame_id;
   std::vector<uint8_t> gray8;
+  std::vector<uint8_t> rgb8;
+  bool has_color{false};
 };
 
 enum class ImageViewerRenderMode {
   Auto = 0,
-  Ascii = 1,
+  Braille = 1,
   Shade = 2,
+  Ascii = 3,
 };
 
 class ImageViewerScreen;
@@ -79,6 +82,7 @@ private:
   int pan_x_{0};
   int pan_y_{0};
   bool invert_grayscale_{false};
+  bool color_enabled_{false};
   bool frozen_{false};
   ImageViewerRenderMode render_mode_{ImageViewerRenderMode::Auto};
   std::shared_ptr<const ImageFrame> frozen_frame_;

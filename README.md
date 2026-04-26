@@ -30,7 +30,7 @@ ros2 run ros2_console_tools topic_monitor
 | --- | --- | --- |
 | `node_commander` | Browse the live ROS 2 graph. | Node list, graph interface details, parameter service reachability, launcher hub for other ROS tools. |
 | `parameter_commander` | Inspect and edit parameters on a selected node. | Namespace-folded parameter tree, scalar and array editing, descriptor and constraint display. |
-| `topic_monitor` | Inspect topics and monitor live traffic. | Rate and bandwidth stats, decoded message view, topic search, embedded visualizers for map, image, joystick, IMU, and LaserScan topics. |
+| `topic_monitor` | Inspect topics and monitor live traffic. | Rate and bandwidth stats, decoded message view, topic search, braille-capable numeric plots, embedded visualizers for map, image, joystick, IMU, and LaserScan topics. |
 | `service_commander` | Inspect and call ROS 2 services. | Generic introspection-based request/response view, scalar request editing, interactive calls. |
 | `action_commander` | Inspect ROS 2 actions. | Protocol endpoint breakdown, server/client node lists, action graph visibility. |
 | `log_viewer` | Read `/rosout` in the terminal. | Source filtering, severity filtering, text filter, detail popup, local source-code inspection when paths are available. |
@@ -42,11 +42,11 @@ ros2 run ros2_console_tools topic_monitor
 
 | Binary | Purpose | Highlights |
 | --- | --- | --- |
-| `map_viewer` | Render `nav_msgs/msg/OccupancyGrid` in the terminal. | Rotated map rendering, costmap-style blocks, legend and monochrome controls. |
-| `image_viewer` | Render `sensor_msgs/msg/Image` in the terminal. | Grayscale image view, zoom, pan, invert, render mode switching, frame freeze. |
+| `map_viewer` | Render `nav_msgs/msg/OccupancyGrid` in the terminal. | Rotated map rendering, costmap-style block default, braille Unicode mode, legend and monochrome controls. |
+| `image_viewer` | Render `sensor_msgs/msg/Image` in the terminal. | Fast mono shade default, optional color and braille modes, zoom, pan, invert, frame freeze. |
 | `joy_viewer` | Visualize `sensor_msgs/msg/Joy` in the terminal. | Axis bars, button states, generic stick pads, frame freeze. |
 | `imu_viewer` | Visualize `sensor_msgs/msg/Imu` in the terminal. | Angular velocity and acceleration bars, orientation readout, orientation-derived tilt, covariance state. |
-| `laser_scan_viewer` | Visualize `sensor_msgs/msg/LaserScan` in the terminal. | Top-down polar scan plot, range zoom, invalid range markers, frame freeze. |
+| `laser_scan_viewer` | Visualize `sensor_msgs/msg/LaserScan` in the terminal. | Braille top-down polar scan plot on Unicode terminals, point-glyph mode, range zoom, invalid range markers, frame freeze. |
 
 ## Common Interaction Model
 
@@ -96,3 +96,14 @@ ROS-backed tools use `rclcpp::Node` backends for subscriptions, clients, graph q
 
 - `service_commander` is currently strongest for scalar request editing; richer structured editing still needs dedicated UI work.
 - `action_commander` is currently inspection-focused and does not yet provide full interactive goal execution.
+
+## Changelog
+
+### 1.6.0
+
+- Added shared Unicode braille rendering helpers for terminal visualizations.
+- Added braille render modes for `map_viewer`, `laser_scan_viewer`, `image_viewer`, and numeric plots in `topic_monitor`.
+- Kept `map_viewer` on costmap-style block rendering by default, with braille available through render mode switching.
+- Changed `image_viewer` `Auto` mode to prefer fast mono shade rendering on Unicode terminals.
+- Added `image_viewer` color decoding for RGB/BGR/RGBA/BGRA/YUY2 streams and a `C` toggle for optional colorized rendering.
+- Preserved existing ASCII and block/point glyph modes as selectable fallbacks.

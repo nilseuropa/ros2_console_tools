@@ -322,6 +322,10 @@ void apply_role_chgat(int row, int col, int count, int role, int extra_attribute
   mvchgat(row, col, count, attributes, has_colors() ? role : 0, nullptr);
 }
 
+int dynamic_color_pair(short foreground, short background) {
+  return ansi_color_pair(foreground, background);
+}
+
 void set_theme(const Theme & theme) {
   g_theme = theme;
   if (!has_colors()) {
@@ -1245,6 +1249,54 @@ TerminalContext terminal_context() {
     return TerminalContext::Ascii;
   }
   return has_colors() ? TerminalContext::Color : TerminalContext::Mono;
+}
+
+uint8_t braille_dot_mask(int subcolumn, int subrow) {
+  static constexpr uint8_t dot_masks[4][2] = {
+    {0x01, 0x08},
+    {0x02, 0x10},
+    {0x04, 0x20},
+    {0x40, 0x80},
+  };
+  if (subcolumn < 0 || subcolumn >= 2 || subrow < 0 || subrow >= 4) {
+    return 0;
+  }
+  return dot_masks[subrow][subcolumn];
+}
+
+std::string braille_glyph(uint8_t dot_mask) {
+  if (dot_mask == 0) {
+    return " ";
+  }
+
+  const uint32_t codepoint = 0x2800u + static_cast<uint32_t>(dot_mask);
+  std::string glyph;
+  glyph.push_back(static_cast<char>(0xE0u | ((codepoint >> 12u) & 0x0Fu)));
+  glyph.push_back(static_cast<char>(0x80u | ((codepoint >> 6u) & 0x3Fu)));
+  glyph.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
+  return glyph;
+}
+
+void add_braille_dot(
+  std::vector<uint8_t> & cells, int cell_columns, int cell_rows, int virtual_column, int virtual_row)
+{
+  if (
+    cell_columns <= 0 || cell_rows <= 0 ||
+    virtual_column < 0 || virtual_row < 0 ||
+    virtual_column >= cell_columns * 2 || virtual_row >= cell_rows * 4)
+  {
+    return;
+  }
+
+  const int cell_column = virtual_column / 2;
+  const int cell_row = virtual_row / 4;
+  const int subcolumn = virtual_column % 2;
+  const int subrow = virtual_row % 4;
+  const auto cell_index = static_cast<std::size_t>(cell_row * cell_columns + cell_column);
+  if (cell_index >= cells.size()) {
+    return;
+  }
+  cells[cell_index] |= braille_dot_mask(subcolumn, subrow);
 }
 
 std::string default_theme_config_path() {

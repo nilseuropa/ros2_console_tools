@@ -64,6 +64,32 @@ using tui::start_search;
 using tui::theme_attr;
 using tui::truncate_text;
 
+TopicPlotRenderMode effective_plot_render_mode(
+  TopicPlotRenderMode mode, tui::TerminalContext context)
+{
+  if (mode == TopicPlotRenderMode::Auto) {
+    return context == tui::TerminalContext::Ascii
+      ? TopicPlotRenderMode::Points
+      : TopicPlotRenderMode::Braille;
+  }
+  if (context == tui::TerminalContext::Ascii && mode == TopicPlotRenderMode::Braille) {
+    return TopicPlotRenderMode::Points;
+  }
+  return mode;
+}
+
+std::string plot_render_mode_label(TopicPlotRenderMode mode, tui::TerminalContext context) {
+  switch (mode) {
+    case TopicPlotRenderMode::Braille:
+      return context == tui::TerminalContext::Ascii ? "braille-points" : "braille";
+    case TopicPlotRenderMode::Points:
+      return "points";
+    case TopicPlotRenderMode::Auto:
+    default:
+      return context == tui::TerminalContext::Ascii ? "auto-points" : "auto-braille";
+  }
+}
+
 }  // namespace
 
 TopicMonitorScreen::TopicMonitorScreen(
@@ -101,6 +127,10 @@ bool TopicMonitorScreen::handle_key(int key) {
       case KEY_ENTER:
       case KEY_F(3):
         plot_popup_open_ = false;
+        return true;
+      case 'm':
+      case 'M':
+        plot_render_mode_ = static_cast<TopicPlotRenderMode>((static_cast<int>(plot_render_mode_) + 1) % 3);
         return true;
       default:
         return true;
@@ -690,6 +720,8 @@ void TopicMonitorScreen::draw_plot_popup(int rows, int columns) const {
   const int plot_bottom = bottom - 3;
   const int plot_width = std::max(8, plot_right - plot_left + 1);
   const int plot_height = std::max(4, plot_bottom - plot_top + 1);
+  const auto context = tui::terminal_context();
+  const auto effective_mode = effective_plot_render_mode(plot_render_mode_, context);
 
   for (int row = top + 1; row < bottom; ++row) {
     attron(COLOR_PAIR(tui::kColorPopup));
@@ -714,13 +746,22 @@ void TopicMonitorScreen::draw_plot_popup(int rows, int columns) const {
     max_value = std::max(max_value, sample.value);
   }
   mvprintw(top + 1, left + 2, "%s", truncate_text(plot_topic_name_ + " :: " + plot_field_name_, popup_width - 4).c_str());
-  mvprintw(top + 2, left + 2, "min=%g  max=%g  samples=%zu", min_value, max_value, samples.size());
+  std::ostringstream stats_line;
+  stats_line << "min=" << min_value
+             << "  max=" << max_value
+             << "  samples=" << samples.size()
+             << "  mode=" << plot_render_mode_label(plot_render_mode_, context);
+  mvprintw(
+    top + 2,
+    left + 2,
+    "%-*s",
+    popup_width - 4,
+    truncate_text(stats_line.str(), popup_width - 4).c_str());
 
   for (int row = plot_top; row <= plot_bottom; ++row) {
     mvhline(row, plot_left, ' ', plot_width);
   }
 
-  const bool ascii_only = tui::terminal_context() == tui::TerminalContext::Ascii;
   const bool crosses_zero = min_value < 0.0 && max_value > 0.0;
   const auto first_time = samples.front().time;
   const auto last_time = samples.back().time;
@@ -729,18 +770,52 @@ void TopicMonitorScreen::draw_plot_popup(int rows, int columns) const {
   const double display_max = crosses_zero ? max_value : max_value;
   const double display_range = std::max(1e-9, display_max - display_min);
 
-  for (const auto & sample : samples) {
-    const double t = samples.size() == 1
-      ? 1.0
-      : std::chrono::duration<double>(sample.time - first_time).count() / span;
-    const int x = std::clamp(static_cast<int>(t * static_cast<double>(plot_width - 1)), 0, plot_width - 1);
-    const double normalized = (sample.value - display_min) / display_range;
-    const int y = plot_bottom - std::clamp(
-      static_cast<int>(normalized * static_cast<double>(plot_height - 1) + 0.5), 0, plot_height - 1);
-    mvaddch(y, plot_left + x, ascii_only ? '.' : ACS_BULLET);
+  if (effective_mode == TopicPlotRenderMode::Braille) {
+    std::vector<uint8_t> cells(static_cast<std::size_t>(plot_width) * static_cast<std::size_t>(plot_height));
+    const int virtual_width = std::max(1, plot_width * 2);
+    const int virtual_height = std::max(1, plot_height * 4);
+    for (const auto & sample : samples) {
+      const double t = samples.size() == 1
+        ? 1.0
+        : std::chrono::duration<double>(sample.time - first_time).count() / span;
+      const int virtual_x = std::clamp(
+        static_cast<int>(t * static_cast<double>(virtual_width - 1) + 0.5),
+        0,
+        virtual_width - 1);
+      const double normalized = (sample.value - display_min) / display_range;
+      const int virtual_y = virtual_height - 1 - std::clamp(
+        static_cast<int>(normalized * static_cast<double>(virtual_height - 1) + 0.5),
+        0,
+        virtual_height - 1);
+      tui::add_braille_dot(cells, plot_width, plot_height, virtual_x, virtual_y);
+    }
+    for (int row_offset = 0; row_offset < plot_height; ++row_offset) {
+      for (int column_offset = 0; column_offset < plot_width; ++column_offset) {
+        const auto cell_index = static_cast<std::size_t>(row_offset * plot_width + column_offset);
+        if (cells[cell_index] == 0) {
+          continue;
+        }
+        mvaddstr(
+          plot_top + row_offset,
+          plot_left + column_offset,
+          tui::braille_glyph(cells[cell_index]).c_str());
+      }
+    }
+  } else {
+    const bool ascii_only = context == tui::TerminalContext::Ascii;
+    for (const auto & sample : samples) {
+      const double t = samples.size() == 1
+        ? 1.0
+        : std::chrono::duration<double>(sample.time - first_time).count() / span;
+      const int x = std::clamp(static_cast<int>(t * static_cast<double>(plot_width - 1)), 0, plot_width - 1);
+      const double normalized = (sample.value - display_min) / display_range;
+      const int y = plot_bottom - std::clamp(
+        static_cast<int>(normalized * static_cast<double>(plot_height - 1) + 0.5), 0, plot_height - 1);
+      mvaddch(y, plot_left + x, ascii_only ? '.' : ACS_BULLET);
+    }
   }
 
-  draw_help_bar_region(bottom - 1, left + 2, popup_width - 4, "F3 Close  Enter Close  Esc Close  F10 Exit");
+  draw_help_bar_region(bottom - 1, left + 2, popup_width - 4, "M Mode  F3 Close  Enter Close  Esc Close  F10 Exit");
 }
 
 }  // namespace ros2_console_tools

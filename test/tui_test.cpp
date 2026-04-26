@@ -36,6 +36,35 @@ TEST(TuiTest, TerminalHelpReflectsVisibilityState) {
   EXPECT_EQ(with_terminal_help("F10 Exit", true), "F10 Exit  Alt+T Hide");
 }
 
+TEST(TuiTest, BrailleDotMaskUsesUnicodeDotLayout) {
+  EXPECT_EQ(braille_dot_mask(0, 0), 0x01);
+  EXPECT_EQ(braille_dot_mask(0, 1), 0x02);
+  EXPECT_EQ(braille_dot_mask(0, 2), 0x04);
+  EXPECT_EQ(braille_dot_mask(0, 3), 0x40);
+  EXPECT_EQ(braille_dot_mask(1, 0), 0x08);
+  EXPECT_EQ(braille_dot_mask(1, 1), 0x10);
+  EXPECT_EQ(braille_dot_mask(1, 2), 0x20);
+  EXPECT_EQ(braille_dot_mask(1, 3), 0x80);
+  EXPECT_EQ(braille_dot_mask(2, 0), 0x00);
+}
+
+TEST(TuiTest, BrailleGlyphEncodesUtf8) {
+  EXPECT_EQ(braille_glyph(0x00), " ");
+  EXPECT_EQ(braille_glyph(0x01), std::string("\xE2\xA0\x81"));
+  EXPECT_EQ(braille_glyph(0xFF), std::string("\xE2\xA3\xBF"));
+}
+
+TEST(TuiTest, AddBrailleDotMapsVirtualCoordinatesToCells) {
+  std::vector<uint8_t> cells(2);
+
+  add_braille_dot(cells, 2, 1, 0, 0);
+  add_braille_dot(cells, 2, 1, 1, 3);
+  add_braille_dot(cells, 2, 1, 2, 2);
+
+  EXPECT_EQ(cells[0], 0x81);
+  EXPECT_EQ(cells[1], 0x04);
+}
+
 TEST(TuiTest, TerminalPaneScrollsScreenBuffer) {
   TerminalPane pane;
   pane.resize_screen_buffer(3, 6);

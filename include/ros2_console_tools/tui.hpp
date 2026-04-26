@@ -4,6 +4,7 @@
 #include <ncursesw/ncurses.h>
 
 #include <array>
+#include <cstdint>
 #include <deque>
 #include <string>
 #include <sys/types.h>
@@ -158,6 +159,7 @@ Theme make_default_theme();
 const Theme & current_theme();
 int theme_attr(int role);
 void apply_role_chgat(int row, int col, int count, int role, int extra_attributes = A_NORMAL);
+int dynamic_color_pair(short foreground, short background);
 void set_theme(const Theme & theme);
 std::string default_theme_config_path();
 bool load_theme_from_file(const std::string & path, std::string * error = nullptr);
@@ -172,6 +174,10 @@ std::string truncate_text(const std::string & text, int width);
 
 bool use_unicode_line_drawing();
 TerminalContext terminal_context();
+uint8_t braille_dot_mask(int subcolumn, int subrow);
+std::string braille_glyph(uint8_t dot_mask);
+void add_braille_dot(
+  std::vector<uint8_t> & cells, int cell_columns, int cell_rows, int virtual_column, int virtual_row);
 void draw_box_char(int row, int col, const cchar_t * wide_char, char ascii_char);
 void draw_text_hline(int row, int col, int count);
 void draw_text_vline(int row, int col, int count);

@@ -15,6 +15,13 @@ namespace ros2_console_tools {
 
 int run_map_viewer_tool(const std::string & topic = "", bool embedded_mode = false);
 
+enum class MapViewerRenderMode {
+  Auto = 0,
+  Braille = 1,
+  Costmap = 2,
+  Ascii = 3,
+};
+
 class MapViewerScreen;
 
 class MapViewerBackend : public rclcpp::Node {
@@ -60,6 +67,7 @@ private:
   std::shared_ptr<MapViewerBackend> backend_;
   bool embedded_mode_{false};
   std::chrono::steady_clock::time_point startup_time_{};
+  MapViewerRenderMode render_mode_{MapViewerRenderMode::Auto};
 };
 
 }  // namespace ros2_console_tools

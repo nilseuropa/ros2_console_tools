@@ -42,9 +42,11 @@ TEST_F(ImageViewerBackendTest, DecodesMono8Image) {
   EXPECT_EQ(frame.width, 3u);
   EXPECT_EQ(frame.height, 2u);
   EXPECT_EQ(frame.gray8, image.data);
+  EXPECT_FALSE(frame.has_color);
+  EXPECT_TRUE(frame.rgb8.empty());
 }
 
-TEST_F(ImageViewerBackendTest, ConvertsBgr8ImageToGrayscale) {
+TEST_F(ImageViewerBackendTest, ConvertsBgr8ImageToColorAndGrayscale) {
   ImageViewerBackend backend("/camera/image");
   sensor_msgs::msg::Image image;
   image.width = 2;
@@ -62,6 +64,8 @@ TEST_F(ImageViewerBackendTest, ConvertsBgr8ImageToGrayscale) {
   ASSERT_EQ(frame.gray8.size(), 2u);
   EXPECT_EQ(frame.gray8[0], 29u);
   EXPECT_EQ(frame.gray8[1], 150u);
+  EXPECT_TRUE(frame.has_color);
+  EXPECT_EQ(frame.rgb8, std::vector<uint8_t>({0, 0, 255, 0, 255, 0}));
 }
 
 TEST_F(ImageViewerBackendTest, ExtractsLumaFromYuv422Yuy2Image) {
@@ -84,6 +88,8 @@ TEST_F(ImageViewerBackendTest, ExtractsLumaFromYuv422Yuy2Image) {
   EXPECT_EQ(frame.gray8[1], 34u);
   EXPECT_EQ(frame.gray8[2], 56u);
   EXPECT_EQ(frame.gray8[3], 78u);
+  EXPECT_TRUE(frame.has_color);
+  EXPECT_EQ(frame.rgb8.size(), 12u);
 }
 
 TEST_F(ImageViewerBackendTest, RejectsUnsupportedEncodings) {
