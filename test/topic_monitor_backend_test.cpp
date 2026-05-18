@@ -460,5 +460,63 @@ TEST_F(TopicMonitorBackendTest, DirectDetailLaunchCanReturnToEmbeddedCallerOnEsc
   EXPECT_FALSE(screen.handle_topic_detail_key(27));
 }
 
+TEST_F(TopicMonitorBackendTest, PlotSessionRangeAccumulatesAcrossSampleSnapshots) {
+  auto backend = std::make_shared<TopicMonitorBackend>();
+  TopicMonitorScreen screen(backend);
+
+  const auto now = TopicClock::now();
+  screen.update_plot_session_range({
+    {now, 2.0},
+    {now + std::chrono::milliseconds(1), -4.0},
+  });
+
+  EXPECT_TRUE(screen.plot_session_has_range_);
+  EXPECT_DOUBLE_EQ(screen.plot_session_min_value_, -4.0);
+  EXPECT_DOUBLE_EQ(screen.plot_session_max_value_, 2.0);
+
+  screen.update_plot_session_range({
+    {now + std::chrono::milliseconds(2), 1.0},
+  });
+
+  EXPECT_DOUBLE_EQ(screen.plot_session_min_value_, -4.0);
+  EXPECT_DOUBLE_EQ(screen.plot_session_max_value_, 2.0);
+
+  screen.update_plot_session_range({
+    {now + std::chrono::milliseconds(3), 8.0},
+  });
+
+  EXPECT_DOUBLE_EQ(screen.plot_session_min_value_, -4.0);
+  EXPECT_DOUBLE_EQ(screen.plot_session_max_value_, 8.0);
+}
+
+TEST_F(TopicMonitorBackendTest, LaunchSelectedPlotResetsSessionRange) {
+  auto backend = std::make_shared<TopicMonitorBackend>();
+  TopicEntry entry;
+  entry.name = "/plot/topic";
+  entry.type = "geometry_msgs/msg/Twist";
+  DetailRow row;
+  row.field = "linear.x";
+  row.value = "1";
+  row.path = "linear.x";
+  row.numeric = true;
+  row.numeric_value = 1.0;
+  entry.detail_rows.push_back(row);
+  backend->topics_.emplace(entry.name, entry);
+  backend->view_mode_ = TopicMonitorViewMode::TopicDetail;
+  backend->detail_topic_name_ = entry.name;
+
+  TopicMonitorScreen screen(backend);
+  screen.plot_session_has_range_ = true;
+  screen.plot_session_min_value_ = -10.0;
+  screen.plot_session_max_value_ = 20.0;
+
+  EXPECT_TRUE(screen.launch_selected_plot());
+
+  EXPECT_TRUE(screen.plot_popup_open_);
+  EXPECT_FALSE(screen.plot_session_has_range_);
+  EXPECT_DOUBLE_EQ(screen.plot_session_min_value_, 0.0);
+  EXPECT_DOUBLE_EQ(screen.plot_session_max_value_, 0.0);
+}
+
 }  // namespace
 }  // namespace ros2_console_tools

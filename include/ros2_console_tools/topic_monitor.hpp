@@ -339,11 +339,13 @@ private:
   bool handle_topic_detail_key(int key);
   bool launch_selected_visualizer();
   bool launch_selected_plot();
+  void reset_plot_session_range();
+  void update_plot_session_range(const std::vector<PlotSample> & samples);
   int page_step() const;
   void draw();
   void draw_topic_list(int top, int left, int bottom, int right);
   void draw_topic_detail(int top, int left, int bottom, int right);
-  void draw_plot_popup(int rows, int columns) const;
+  void draw_plot_popup(int rows, int columns);
   void draw_status_line(int row, int columns) const;
   void draw_help_line(int row, int columns) const;
 
@@ -355,6 +357,9 @@ private:
   std::string plot_field_name_;
   std::string plot_field_path_;
   TopicPlotRenderMode plot_render_mode_{TopicPlotRenderMode::Auto};
+  bool plot_session_has_range_{false};
+  double plot_session_min_value_{0.0};
+  double plot_session_max_value_{0.0};
   tui::TerminalPane terminal_pane_;
 };
 

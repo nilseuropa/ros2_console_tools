@@ -414,9 +414,29 @@ bool TopicMonitorScreen::launch_selected_plot() {
   plot_topic_name_ = backend_->detail_topic_name_;
   plot_field_name_ = selected->field;
   plot_field_path_ = selected->path;
+  reset_plot_session_range();
   plot_popup_open_ = true;
   backend_->status_line_ = "Plotting " + plot_field_path_ + ".";
   return true;
+}
+
+void TopicMonitorScreen::reset_plot_session_range() {
+  plot_session_has_range_ = false;
+  plot_session_min_value_ = 0.0;
+  plot_session_max_value_ = 0.0;
+}
+
+void TopicMonitorScreen::update_plot_session_range(const std::vector<PlotSample> & samples) {
+  for (const auto & sample : samples) {
+    if (!plot_session_has_range_) {
+      plot_session_min_value_ = sample.value;
+      plot_session_max_value_ = sample.value;
+      plot_session_has_range_ = true;
+      continue;
+    }
+    plot_session_min_value_ = std::min(plot_session_min_value_, sample.value);
+    plot_session_max_value_ = std::max(plot_session_max_value_, sample.value);
+  }
 }
 
 void TopicMonitorScreen::draw() {
@@ -705,7 +725,7 @@ void TopicMonitorScreen::draw_help_line(int row, int columns) const {
   draw_help_bar(row, columns, tui::with_terminal_help(help, terminal_pane_.visible()));
 }
 
-void TopicMonitorScreen::draw_plot_popup(int rows, int columns) const {
+void TopicMonitorScreen::draw_plot_popup(int rows, int columns) {
   const auto samples = backend_->plot_samples_snapshot(plot_topic_name_, plot_field_path_);
   const int popup_width = std::min(columns - 6, 96);
   const int popup_height = std::min(rows - 4, 22);
@@ -739,16 +759,13 @@ void TopicMonitorScreen::draw_plot_popup(int rows, int columns) const {
     return;
   }
 
-  double min_value = samples.front().value;
-  double max_value = samples.front().value;
-  for (const auto & sample : samples) {
-    min_value = std::min(min_value, sample.value);
-    max_value = std::max(max_value, sample.value);
-  }
+  update_plot_session_range(samples);
+  const double min_value = plot_session_min_value_;
+  const double max_value = plot_session_max_value_;
   mvprintw(top + 1, left + 2, "%s", truncate_text(plot_topic_name_ + " :: " + plot_field_name_, popup_width - 4).c_str());
   std::ostringstream stats_line;
-  stats_line << "min=" << min_value
-             << "  max=" << max_value
+  stats_line << "seen_min=" << min_value
+             << "  seen_max=" << max_value
              << "  samples=" << samples.size()
              << "  mode=" << plot_render_mode_label(plot_render_mode_, context);
   mvprintw(
