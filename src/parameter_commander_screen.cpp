@@ -301,6 +301,11 @@ void ParameterCommanderScreen::handle_list_key(int key) {
     return;
   }
 
+  const auto redraw_if_structure_changed = [&](std::size_t previous_item_count) {
+    tui::request_full_redraw_if_structure_changed(
+      previous_item_count, backend_->visible_parameter_items().size());
+  };
+
   switch (key) {
     case KEY_UP:
     case 'k':
@@ -330,14 +335,17 @@ void ParameterCommanderScreen::handle_list_key(int key) {
     case KEY_RIGHT:
     case 'l':
       backend_->expand_selected_namespace();
+      redraw_if_structure_changed(items.size());
       break;
     case KEY_LEFT:
     case 'h':
       backend_->collapse_selected_namespace();
+      redraw_if_structure_changed(items.size());
       break;
     case '\n':
     case KEY_ENTER:
       backend_->activate_selected_parameter_item();
+      redraw_if_structure_changed(items.size());
       if (backend_->selected_entry() != nullptr) {
         open_popup();
       }
@@ -412,6 +420,11 @@ void ParameterCommanderScreen::draw() {
   int rows = 0;
   int columns = 0;
   getmaxyx(stdscr, rows, columns);
+  if (!tui::terminal_size_supported(rows, columns)) {
+    tui::draw_terminal_size_warning(rows, columns);
+    refresh();
+    return;
+  }
   const auto layout = tui::make_commander_layout(rows, terminal_pane_.visible());
   const int help_row = layout.help_row;
   const int status_row = layout.status_row;
@@ -439,17 +452,17 @@ void ParameterCommanderScreen::draw_parameter_list(int top, int left, int bottom
   const auto items = backend_->visible_parameter_items();
   const int visible_rows = std::max(1, bottom - top + 1);
   const int width = right - left + 1;
-  const int name_width = std::max(22, width / 3);
-  const int value_width = std::max(12, width / 6);
-  const int desc_width = std::max(10, width - name_width - value_width - 2);
+  const auto compact_widths = tui::fit_column_widths(width - 2, {12, 8, 8}, {2, 1, 3});
+  const int name_width = width >= 46 ? std::max(22, width / 3) : compact_widths[0];
+  const int value_width = width >= 46 ? std::max(12, width / 6) : compact_widths[1];
+  const int desc_width = width >= 46
+    ? width - name_width - value_width - 2
+    : compact_widths[2];
   const int separator_one_x = left + name_width;
   const int separator_two_x = left + name_width + 1 + value_width;
-  if (backend_->selected_parameter_item_index_ < backend_->list_scroll_) {
-    backend_->list_scroll_ = backend_->selected_parameter_item_index_;
-  }
-  if (backend_->selected_parameter_item_index_ >= backend_->list_scroll_ + visible_rows) {
-    backend_->list_scroll_ = backend_->selected_parameter_item_index_ - visible_rows + 1;
-  }
+  const int visible_item_rows = std::max(1, visible_rows - 1);
+  backend_->list_scroll_ = tui::update_scroll_offset_for_selection(
+    backend_->selected_parameter_item_index_, backend_->list_scroll_, visible_item_rows);
 
   const std::string header = pad_column("Name", name_width) + " "
     + pad_column("Current", value_width) + " "
@@ -556,12 +569,8 @@ void ParameterCommanderScreen::draw_parameter_name_cell(
 void ParameterCommanderScreen::draw_node_list(int top, int left, int bottom, int right) {
   const int visible_rows = std::max(1, bottom - top + 1);
   const int width = right - left + 1;
-  if (backend_->selected_node_index_ < backend_->node_scroll_) {
-    backend_->node_scroll_ = backend_->selected_node_index_;
-  }
-  if (backend_->selected_node_index_ >= backend_->node_scroll_ + visible_rows - 1) {
-    backend_->node_scroll_ = backend_->selected_node_index_ - visible_rows + 2;
-  }
+  backend_->node_scroll_ = tui::update_scroll_offset_for_selection(
+    backend_->selected_node_index_, backend_->node_scroll_, visible_rows - 1);
 
   attron(theme_attr(kColorHeader));
   mvaddnstr(top, left, pad_column("Discovered Nodes", width).c_str(), width);

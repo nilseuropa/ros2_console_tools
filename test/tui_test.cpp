@@ -36,6 +36,47 @@ TEST(TuiTest, TerminalHelpReflectsVisibilityState) {
   EXPECT_EQ(with_terminal_help("F10 Exit", true), "F10 Exit  Alt+T Hide");
 }
 
+TEST(TuiTest, TerminalSizeSupportIncludesCompactTerminals) {
+  EXPECT_TRUE(terminal_size_supported(18, 40));
+  EXPECT_TRUE(terminal_size_supported(24, 60));
+  EXPECT_FALSE(terminal_size_supported(17, 80));
+  EXPECT_FALSE(terminal_size_supported(24, 39));
+}
+
+TEST(TuiTest, FitColumnWidthsNeverExceedsAvailableWidth) {
+  const auto widths = fit_column_widths(35, {14, 7, 10}, {4, 1, 2});
+
+  ASSERT_EQ(widths.size(), 3u);
+  EXPECT_EQ(widths[0] + widths[1] + widths[2], 35);
+  EXPECT_GE(widths[0], 14);
+  EXPECT_GE(widths[1], 7);
+  EXPECT_GE(widths[2], 10);
+}
+
+TEST(TuiTest, FitColumnWidthsCompressesOversizedMinimums) {
+  const auto widths = fit_column_widths(12, {14, 7, 10}, {4, 1, 2});
+
+  ASSERT_EQ(widths.size(), 3u);
+  EXPECT_EQ(widths[0] + widths[1] + widths[2], 12);
+  EXPECT_GT(widths[0], 0);
+  EXPECT_GT(widths[1], 0);
+  EXPECT_GT(widths[2], 0);
+}
+
+TEST(TuiTest, FitSplitWidthPreservesBothPanes) {
+  EXPECT_EQ(fit_split_width(38, 34, 14, 12), 26);
+  EXPECT_EQ(fit_split_width(58, 28, 14, 12), 28);
+}
+
+TEST(TuiTest, ScrollOffsetKeepsSelectionInsideVisibleItemRows) {
+  EXPECT_EQ(scroll_offset_for_selection(11, 0, 13), 0);
+  EXPECT_EQ(scroll_offset_for_selection(12, 0, 13), 0);
+  EXPECT_EQ(scroll_offset_for_selection(13, 0, 13), 1);
+  EXPECT_EQ(scroll_offset_for_selection(20, 8, 13), 8);
+  EXPECT_EQ(scroll_offset_for_selection(21, 8, 13), 9);
+  EXPECT_EQ(scroll_offset_for_selection(4, 8, 13), 4);
+}
+
 TEST(TuiTest, BrailleDotMaskUsesUnicodeDotLayout) {
   EXPECT_EQ(braille_dot_mask(0, 0), 0x01);
   EXPECT_EQ(braille_dot_mask(0, 1), 0x02);

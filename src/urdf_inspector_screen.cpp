@@ -136,13 +136,21 @@ bool UrdfInspectorScreen::handle_key(int key) {
       }
       return true;
     case KEY_RIGHT:
-    case 'l':
+    case 'l': {
+      const std::size_t previous_row_count = backend_->rows_.size();
       backend_->expand_selected();
+      tui::request_full_redraw_if_structure_changed(
+        previous_row_count, backend_->rows_.size());
       return true;
+    }
     case KEY_LEFT:
-    case 'h':
+    case 'h': {
+      const std::size_t previous_row_count = backend_->rows_.size();
       backend_->collapse_selected();
+      tui::request_full_redraw_if_structure_changed(
+        previous_row_count, backend_->rows_.size());
       return true;
+    }
     case '\n':
     case KEY_ENTER:
       if (const auto section = backend_->selected_xml_section()) {
@@ -441,6 +449,11 @@ void UrdfInspectorScreen::draw() {
   int rows = 0;
   int columns = 0;
   getmaxyx(stdscr, rows, columns);
+  if (!tui::terminal_size_supported(rows, columns)) {
+    tui::draw_terminal_size_warning(rows, columns);
+    refresh();
+    return;
+  }
   const auto layout = tui::make_commander_layout(rows, terminal_pane_.visible());
   const int help_row = layout.help_row;
   const int status_row = layout.status_row;
@@ -451,7 +464,9 @@ void UrdfInspectorScreen::draw() {
   mvprintw(0, 1, "URDF Inspector ");
   attroff(theme_attr(kColorTitle));
 
-  const int left_width = std::max(28, (columns - 2) / 2);
+  const int pane_width = columns - 2;
+  const int left_width = tui::fit_split_width(
+    pane_width - 1, std::max(28, pane_width / 2), 14, 12);
   const int separator_x = 1 + left_width;
   draw_tree_pane(1, 1, content_bottom - 1, separator_x - 1);
   attron(COLOR_PAIR(kColorFrame));
@@ -475,12 +490,8 @@ void UrdfInspectorScreen::draw_tree_pane(int top, int left, int bottom, int righ
 
   const int width = right - left + 1;
   const int visible_rows = std::max(1, bottom - top + 1);
-  if (backend_->selected_index_ < backend_->tree_scroll_) {
-    backend_->tree_scroll_ = backend_->selected_index_;
-  }
-  if (backend_->selected_index_ >= backend_->tree_scroll_ + visible_rows - 1) {
-    backend_->tree_scroll_ = std::max(0, backend_->selected_index_ - visible_rows + 2);
-  }
+  backend_->tree_scroll_ = tui::update_scroll_offset_for_selection(
+    backend_->selected_index_, backend_->tree_scroll_, visible_rows - 1);
 
   attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, "Tree");

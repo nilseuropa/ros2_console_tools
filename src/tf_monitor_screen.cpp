@@ -201,6 +201,11 @@ void TfMonitorScreen::draw() {
   int rows = 0;
   int columns = 0;
   getmaxyx(stdscr, rows, columns);
+  if (!tui::terminal_size_supported(rows, columns)) {
+    tui::draw_terminal_size_warning(rows, columns);
+    refresh();
+    return;
+  }
   const auto layout = tui::make_commander_layout(rows, terminal_pane_.visible());
   const int help_row = layout.help_row;
   const int status_row = layout.status_row;
@@ -230,12 +235,8 @@ void TfMonitorScreen::draw_tree_pane(int top, int left, int bottom, int right) {
   const int freshness_width = std::max(10, width - tree_width - 1);
   const int sep_one_x = left + tree_width;
 
-  if (backend_->selected_index_ < backend_->scroll_) {
-    backend_->scroll_ = backend_->selected_index_;
-  }
-  if (backend_->selected_index_ >= backend_->scroll_ + visible_rows - 1) {
-    backend_->scroll_ = std::max(0, backend_->selected_index_ - visible_rows + 2);
-  }
+  backend_->scroll_ = tui::update_scroll_offset_for_selection(
+    backend_->selected_index_, backend_->scroll_, visible_rows - 1);
 
   attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", tree_width, "Transform");

@@ -264,6 +264,11 @@ void DiagnosticsViewerScreen::draw() {
   int rows = 0;
   int columns = 0;
   getmaxyx(stdscr, rows, columns);
+  if (!tui::terminal_size_supported(rows, columns)) {
+    tui::draw_terminal_size_warning(rows, columns);
+    refresh();
+    return;
+  }
   const auto layout = tui::make_commander_layout(rows, terminal_pane_.visible());
   const int help_row = layout.help_row;
   const int status_row = layout.status_row;
@@ -274,7 +279,9 @@ void DiagnosticsViewerScreen::draw() {
   mvprintw(0, 1, "Diagnostics Viewer ");
   attroff(theme_attr(kColorTitle));
 
-  const int left_width = std::max(34, (columns - 2) / 2);
+  const int pane_width = columns - 2;
+  const int left_width = tui::fit_split_width(
+    pane_width - 1, std::max(34, pane_width / 2), 16, 12);
   const int separator_x = 1 + left_width;
   draw_status_list(1, 1, content_bottom - 1, separator_x - 1);
   attron(COLOR_PAIR(kColorFrame));
@@ -296,12 +303,8 @@ void DiagnosticsViewerScreen::draw_status_list(int top, int left, int bottom, in
 
   const int width = right - left + 1;
   const int visible_rows = std::max(1, bottom - top);
-  if (backend_->selected_status_index_ < backend_->status_scroll_) {
-    backend_->status_scroll_ = backend_->selected_status_index_;
-  }
-  if (backend_->selected_status_index_ >= backend_->status_scroll_ + visible_rows) {
-    backend_->status_scroll_ = std::max(0, backend_->selected_status_index_ - visible_rows + 1);
-  }
+  backend_->status_scroll_ = tui::update_scroll_offset_for_selection(
+    backend_->selected_status_index_, backend_->status_scroll_, visible_rows);
 
   attron(theme_attr(kColorHeader));
   mvprintw(
@@ -353,12 +356,8 @@ void DiagnosticsViewerScreen::draw_details(int top, int left, int bottom, int ri
 
   const int width = right - left + 1;
   const int visible_rows = std::max(1, bottom - top);
-  if (backend_->selected_detail_index_ < backend_->detail_scroll_) {
-    backend_->detail_scroll_ = backend_->selected_detail_index_;
-  }
-  if (backend_->selected_detail_index_ >= backend_->detail_scroll_ + visible_rows) {
-    backend_->detail_scroll_ = std::max(0, backend_->selected_detail_index_ - visible_rows + 1);
-  }
+  backend_->detail_scroll_ = tui::update_scroll_offset_for_selection(
+    backend_->selected_detail_index_, backend_->detail_scroll_, visible_rows);
 
   attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, focus_ == DiagnosticsPaneFocus::Details ? "Details <" : "Details");

@@ -2,7 +2,7 @@
 
 `ros2_console_tools` is a terminal-first toolbox for ROS 2 runtime inspection, visualization, and operator workflows.
 
-Current package release: `1.6.1`.
+Current package release: `1.6.2`.
 
 ![Node Commander demo](doc/ros2_console_tools_demo.gif)
 
@@ -98,6 +98,15 @@ ROS-backed tools use `rclcpp::Node` backends for subscriptions, clients, graph q
 - `action_commander` is currently inspection-focused and does not yet provide full interactive goal execution.
 
 ## Changelog
+
+### 1.6.2
+
+- Added responsive layouts for compact terminals down to 40 columns by 18 lines.
+- Added compact topic-monitor columns, log-viewer panes, split views, and Node Commander help.
+- Added a clear size warning for terminals smaller than the supported minimum.
+- Fixed stale VT320 rows after collapsing parameter, topic, message-field, node-detail, and URDF trees.
+- Fixed list selection visibility at compact-terminal viewport boundaries.
+- Added full VT320 repaints when cursor-driven list viewports scroll.
 
 ### 1.6.0
 

@@ -455,6 +455,11 @@ void LogViewerScreen::draw() {
   int rows = 0;
   int columns = 0;
   getmaxyx(stdscr, rows, columns);
+  if (!tui::terminal_size_supported(rows, columns)) {
+    tui::draw_terminal_size_warning(rows, columns);
+    refresh();
+    return;
+  }
   const auto layout = tui::make_commander_layout(rows, terminal_pane_.visible());
   const int help_row = layout.help_row;
   const int status_row = layout.status_row;
@@ -467,7 +472,9 @@ void LogViewerScreen::draw() {
   if (backend_->view_mode_ == LogViewerViewMode::CodeInspect) {
     draw_code_view_pane(1, 1, content_bottom - 1, columns - 2);
   } else if (backend_->view_mode_ == LogViewerViewMode::Split) {
-    const int left_width = std::max(24, (columns - 2) / 4);
+    const int pane_width = columns - 2;
+    const int left_width = tui::fit_split_width(
+      pane_width - 1, std::max(24, pane_width / 4), 14, 12);
     const int separator_x = 1 + left_width;
     draw_sources_pane(1, 1, content_bottom - 1, separator_x - 1);
     attron(COLOR_PAIR(kColorFrame));
@@ -657,12 +664,8 @@ void LogViewerScreen::draw_sources_pane(int top, int left, int bottom, int right
 
   const int width = right - left + 1;
   const int visible_rows = std::max(1, bottom - top + 1);
-  if (backend_->selected_source_index_ < backend_->source_scroll_) {
-    backend_->source_scroll_ = backend_->selected_source_index_;
-  }
-  if (backend_->selected_source_index_ >= backend_->source_scroll_ + visible_rows - 1) {
-    backend_->source_scroll_ = std::max(0, backend_->selected_source_index_ - visible_rows + 2);
-  }
+  backend_->source_scroll_ = tui::update_scroll_offset_for_selection(
+    backend_->selected_source_index_, backend_->source_scroll_, visible_rows - 1);
 
   attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, "Sources");
@@ -700,6 +703,48 @@ void LogViewerScreen::draw_logs_pane(int top, int left, int bottom, int right) {
 
   const int width = right - left + 1;
   const int visible_rows = std::max(1, bottom - top + 1);
+  if (width < 47) {
+    backend_->log_scroll_ = tui::update_scroll_offset_for_selection(
+      backend_->selected_log_index_, backend_->log_scroll_, visible_rows - 1);
+
+    attron(theme_attr(kColorHeader));
+    mvprintw(top, left, "%-*s", width, "Logs");
+    attroff(theme_attr(kColorHeader));
+
+    const int first_row = backend_->log_scroll_;
+    const int last_row = std::min(
+      static_cast<int>(snapshot.size()), first_row + visible_rows - 1);
+    for (int row = top + 1; row <= bottom; ++row) {
+      const bool has_item = first_row + (row - top - 1) < last_row;
+      const bool selected =
+        has_item && first_row + (row - top - 1) == backend_->selected_log_index_;
+      mvhline(row, left, ' ', width);
+      if (!has_item) {
+        continue;
+      }
+
+      const auto & entry = snapshot[static_cast<std::size_t>(first_row + (row - top - 1))];
+      const int color = level_color(entry.level, selected && backend_->focus_ == PaneFocus::Logs);
+      const std::string source = width >= 24 ? (entry.source + ": ") : "";
+      const std::string rendered = truncate_text(
+        level_string(entry.level) + " " + source + entry.message, width);
+      if (color != 0) {
+        attron(COLOR_PAIR(color));
+      }
+      mvprintw(row, left, "%-*s", width, rendered.c_str());
+      if (color != 0) {
+        attroff(COLOR_PAIR(color));
+      }
+      if (selected && backend_->focus_ == PaneFocus::Logs) {
+        apply_role_chgat(row, left, width, kColorSelection);
+        if (color != 0) {
+          apply_role_chgat(row, left, static_cast<int>(rendered.size()), color);
+        }
+      }
+    }
+    return;
+  }
+
   const int time_width = 12;
   const int level_width = 6;
   const int source_width = std::max(16, width / 4);
@@ -708,12 +753,8 @@ void LogViewerScreen::draw_logs_pane(int top, int left, int bottom, int right) {
   const int sep_two_x = sep_one_x + 1 + level_width;
   const int sep_three_x = sep_two_x + 1 + source_width;
 
-  if (backend_->selected_log_index_ < backend_->log_scroll_) {
-    backend_->log_scroll_ = backend_->selected_log_index_;
-  }
-  if (backend_->selected_log_index_ >= backend_->log_scroll_ + visible_rows - 1) {
-    backend_->log_scroll_ = std::max(0, backend_->selected_log_index_ - visible_rows + 2);
-  }
+  backend_->log_scroll_ = tui::update_scroll_offset_for_selection(
+    backend_->selected_log_index_, backend_->log_scroll_, visible_rows - 1);
 
   attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", time_width, "Time");
@@ -779,12 +820,8 @@ void LogViewerScreen::draw_live_source_pane(int top, int left, int bottom, int r
 
   const int width = right - left + 1;
   const int visible_rows = std::max(1, bottom - top + 1);
-  if (backend_->selected_live_log_index_ < backend_->live_log_scroll_) {
-    backend_->live_log_scroll_ = backend_->selected_live_log_index_;
-  }
-  if (backend_->selected_live_log_index_ >= backend_->live_log_scroll_ + visible_rows - 1) {
-    backend_->live_log_scroll_ = std::max(0, backend_->selected_live_log_index_ - visible_rows + 2);
-  }
+  backend_->live_log_scroll_ = tui::update_scroll_offset_for_selection(
+    backend_->selected_live_log_index_, backend_->live_log_scroll_, visible_rows - 1);
 
   attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, truncate_text("Live: " + backend_->live_source_name_, width).c_str());

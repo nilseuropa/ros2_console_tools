@@ -817,6 +817,11 @@ void MapViewerScreen::draw() {
   int rows = 0;
   int columns = 0;
   getmaxyx(stdscr, rows, columns);
+  if (!tui::terminal_size_supported(rows, columns)) {
+    tui::draw_terminal_size_warning(rows, columns);
+    refresh();
+    return;
+  }
   const int help_row = rows - 1;
   const int status_row = rows - 2;
   const int content_bottom = rows - 3;

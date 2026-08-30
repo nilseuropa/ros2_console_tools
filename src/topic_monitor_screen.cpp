@@ -216,10 +216,14 @@ bool TopicMonitorScreen::handle_topic_list_key(int key) {
     case KEY_RIGHT:
     case 'l':
       backend_->expand_selected_namespace();
+      tui::request_full_redraw_if_structure_changed(
+        items.size(), backend_->visible_topic_items().size());
       return true;
     case KEY_LEFT:
     case 'h':
       backend_->collapse_selected_namespace();
+      tui::request_full_redraw_if_structure_changed(
+        items.size(), backend_->visible_topic_items().size());
       return true;
     case ' ':
     case KEY_IC:
@@ -305,13 +309,23 @@ bool TopicMonitorScreen::handle_topic_detail_key(int key) {
       }
       return true;
     case KEY_RIGHT:
-    case 'l':
+    case 'l': {
       backend_->expand_selected_detail_row();
+      const auto updated_rows =
+        backend_->visible_detail_rows_snapshot(backend_->detail_topic_name_);
+      tui::request_full_redraw_if_structure_changed(
+        rows.size(), updated_rows.size());
       return true;
+    }
     case KEY_LEFT:
-    case 'h':
+    case 'h': {
       backend_->collapse_selected_detail_row();
+      const auto updated_rows =
+        backend_->visible_detail_rows_snapshot(backend_->detail_topic_name_);
+      tui::request_full_redraw_if_structure_changed(
+        rows.size(), updated_rows.size());
       return true;
+    }
     default:
       return true;
   }
@@ -445,6 +459,11 @@ void TopicMonitorScreen::draw() {
   int rows = 0;
   int columns = 0;
   getmaxyx(stdscr, rows, columns);
+  if (!tui::terminal_size_supported(rows, columns)) {
+    tui::draw_terminal_size_warning(rows, columns);
+    refresh();
+    return;
+  }
   const auto layout = tui::make_commander_layout(rows, terminal_pane_.visible());
   const int help_row = layout.help_row;
   const int status_row = layout.status_row;
@@ -475,45 +494,141 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
 
   const int visible_rows = std::max(1, bottom - top + 1);
   const int width = right - left + 1;
-  const int avg_width = std::max(7, width / 14);
-  const int minmax_width = std::max(10, width / 12);
-  const int missed_width = std::max(6, width / 18);
-  const int last_recovery_width = std::max(8, width / 14);
-  const int average_recovery_width = std::max(8, width / 14);
-  const int bandwidth_width = std::max(10, width / 12);
-  const int topic_width =
-    std::max(
-      14,
-      width - avg_width - minmax_width - missed_width - last_recovery_width -
-      average_recovery_width - bandwidth_width - 6);
-  const int sep_one_x = left + topic_width;
-  const int sep_two_x = sep_one_x + 1 + avg_width;
-  const int sep_three_x = sep_two_x + 1 + minmax_width;
-  const int sep_four_x = sep_three_x + 1 + missed_width;
-  const int sep_five_x = sep_four_x + 1 + last_recovery_width;
-  const int sep_six_x = sep_five_x + 1 + average_recovery_width;
 
-  if (backend_->selected_index_ < backend_->list_scroll_) {
-    backend_->list_scroll_ = backend_->selected_index_;
+  enum class TopicColumn {
+    Topic,
+    AverageHz,
+    MinMaxHz,
+    Missed,
+    LastRecovery,
+    AverageRecovery,
+    Bandwidth,
+  };
+
+  std::vector<TopicColumn> columns;
+  if (width >= 69) {
+    columns = {
+      TopicColumn::Topic,
+      TopicColumn::AverageHz,
+      TopicColumn::MinMaxHz,
+      TopicColumn::Missed,
+      TopicColumn::LastRecovery,
+      TopicColumn::AverageRecovery,
+      TopicColumn::Bandwidth,
+    };
+  } else if (width >= 48) {
+    columns = {
+      TopicColumn::Topic,
+      TopicColumn::AverageHz,
+      TopicColumn::Missed,
+      TopicColumn::Bandwidth,
+    };
+  } else {
+    columns = {
+      TopicColumn::Topic,
+      TopicColumn::AverageHz,
+      TopicColumn::Bandwidth,
+    };
   }
-  if (backend_->selected_index_ >= backend_->list_scroll_ + visible_rows - 1) {
-    backend_->list_scroll_ = std::max(0, backend_->selected_index_ - visible_rows + 2);
+
+  std::vector<int> minimum_widths;
+  std::vector<int> growth_weights;
+  for (const auto column : columns) {
+    switch (column) {
+      case TopicColumn::Topic:
+        minimum_widths.push_back(14);
+        growth_weights.push_back(4);
+        break;
+      case TopicColumn::AverageHz:
+        minimum_widths.push_back(7);
+        growth_weights.push_back(1);
+        break;
+      case TopicColumn::MinMaxHz:
+        minimum_widths.push_back(10);
+        growth_weights.push_back(2);
+        break;
+      case TopicColumn::Missed:
+        minimum_widths.push_back(6);
+        growth_weights.push_back(1);
+        break;
+      case TopicColumn::LastRecovery:
+      case TopicColumn::AverageRecovery:
+        minimum_widths.push_back(8);
+        growth_weights.push_back(1);
+        break;
+      case TopicColumn::Bandwidth:
+        minimum_widths.push_back(10);
+        growth_weights.push_back(2);
+        break;
+    }
   }
+
+  const int separator_count = static_cast<int>(columns.size()) - 1;
+  std::vector<int> column_widths;
+  if (columns.size() == 7) {
+    const int avg_width = std::max(7, width / 14);
+    const int minmax_width = std::max(10, width / 12);
+    const int missed_width = std::max(6, width / 18);
+    const int last_recovery_width = std::max(8, width / 14);
+    const int average_recovery_width = std::max(8, width / 14);
+    const int bandwidth_width = std::max(10, width / 12);
+    const int topic_width =
+      width - avg_width - minmax_width - missed_width - last_recovery_width -
+      average_recovery_width - bandwidth_width - separator_count;
+    column_widths = {
+      topic_width,
+      avg_width,
+      minmax_width,
+      missed_width,
+      last_recovery_width,
+      average_recovery_width,
+      bandwidth_width,
+    };
+  } else {
+    column_widths = tui::fit_column_widths(
+      width - separator_count, minimum_widths, growth_weights);
+  }
+  std::vector<int> column_lefts;
+  std::vector<int> separator_positions;
+  int column_left = left;
+  for (std::size_t index = 0; index < columns.size(); ++index) {
+    if (index > 0) {
+      separator_positions.push_back(column_left);
+      ++column_left;
+    }
+    column_lefts.push_back(column_left);
+    column_left += column_widths[index];
+  }
+
+  const auto column_header = [](TopicColumn column) -> const char * {
+    switch (column) {
+      case TopicColumn::Topic: return "Topic";
+      case TopicColumn::AverageHz: return "Avg Hz";
+      case TopicColumn::MinMaxHz: return "Min/Max Hz";
+      case TopicColumn::Missed: return "Missed";
+      case TopicColumn::LastRecovery: return "Last Back";
+      case TopicColumn::AverageRecovery: return "Avg Back";
+      case TopicColumn::Bandwidth: return "Bandwidth";
+    }
+    return "";
+  };
+
+  const auto draw_separators = [&](int row) {
+    for (int separator_x : separator_positions) {
+      draw_box_char(row, separator_x, WACS_VLINE, '|');
+    }
+  };
+
+  backend_->list_scroll_ = tui::update_scroll_offset_for_selection(
+    backend_->selected_index_, backend_->list_scroll_, visible_rows - 1);
 
   attron(theme_attr(kColorHeader));
-  mvprintw(top, left, "%-*s", topic_width, "Topic");
-  draw_box_char(top, sep_one_x, WACS_VLINE, '|');
-  mvprintw(top, sep_one_x + 1, "%-*s", avg_width, "Avg Hz");
-  draw_box_char(top, sep_two_x, WACS_VLINE, '|');
-  mvprintw(top, sep_two_x + 1, "%-*s", minmax_width, "Min/Max Hz");
-  draw_box_char(top, sep_three_x, WACS_VLINE, '|');
-  mvprintw(top, sep_three_x + 1, "%-*s", missed_width, "Missed");
-  draw_box_char(top, sep_four_x, WACS_VLINE, '|');
-  mvprintw(top, sep_four_x + 1, "%-*s", last_recovery_width, "Last Back");
-  draw_box_char(top, sep_five_x, WACS_VLINE, '|');
-  mvprintw(top, sep_five_x + 1, "%-*s", average_recovery_width, "Avg Back");
-  draw_box_char(top, sep_six_x, WACS_VLINE, '|');
-  mvprintw(top, sep_six_x + 1, "%-*s", bandwidth_width, "Bandwidth");
+  for (std::size_t index = 0; index < columns.size(); ++index) {
+    mvprintw(
+      top, column_lefts[index], "%-*s", column_widths[index],
+      truncate_text(column_header(columns[index]), column_widths[index]).c_str());
+  }
+  draw_separators(top);
   attroff(theme_attr(kColorHeader));
 
   const int first_row = backend_->list_scroll_;
@@ -526,12 +641,7 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
     if (selected) {
       apply_role_chgat(row, left, width, kColorSelection);
     }
-    draw_box_char(row, sep_one_x, WACS_VLINE, '|');
-    draw_box_char(row, sep_two_x, WACS_VLINE, '|');
-    draw_box_char(row, sep_three_x, WACS_VLINE, '|');
-    draw_box_char(row, sep_four_x, WACS_VLINE, '|');
-    draw_box_char(row, sep_five_x, WACS_VLINE, '|');
-    draw_box_char(row, sep_six_x, WACS_VLINE, '|');
+    draw_separators(row);
 
     if (!has_item) {
       continue;
@@ -539,33 +649,13 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
 
     const auto & entry = items[static_cast<std::size_t>(first_row + (row - top - 1))];
     const std::string topic_text = std::string(static_cast<std::size_t>(entry.depth * 2), ' ') + entry.label;
-    if (entry.is_namespace) {
-      const int text_color = selected ? kColorSelection : kColorFrame;
-      if (text_color != 0) {
-        attron(COLOR_PAIR(text_color));
-      }
-      mvprintw(row, left, "%-*s", topic_width, truncate_text(topic_text, topic_width).c_str());
-      if (text_color != 0) {
-        attroff(COLOR_PAIR(text_color));
-      }
-      if (selected) {
-        apply_role_chgat(row, left, width, kColorSelection);
-        draw_box_char(row, sep_one_x, WACS_VLINE, '|');
-        draw_box_char(row, sep_two_x, WACS_VLINE, '|');
-        draw_box_char(row, sep_three_x, WACS_VLINE, '|');
-        draw_box_char(row, sep_four_x, WACS_VLINE, '|');
-        draw_box_char(row, sep_five_x, WACS_VLINE, '|');
-        draw_box_char(row, sep_six_x, WACS_VLINE, '|');
-        apply_role_chgat(row, left, topic_width, kColorSelection);
-      }
-      continue;
-    }
-
     const auto & row_data = entry.row;
-    const std::string missed_text = row_data.monitored
+    const std::string missed_text = !entry.is_namespace && row_data.monitored
       ? std::to_string(row_data.total_missed_messages)
       : "-";
-    const int text_color =
+    const int text_color = entry.is_namespace
+      ? (selected ? kColorSelection : kColorFrame)
+      :
       row_data.stale
       ? (selected ? kColorStaleSelection : kColorStale)
       : row_data.monitored
@@ -574,42 +664,35 @@ void TopicMonitorScreen::draw_topic_list(int top, int left, int bottom, int righ
     if (text_color != 0) {
       attron(COLOR_PAIR(text_color));
     }
-    mvprintw(row, left, "%-*s", topic_width, truncate_text(topic_text, topic_width).c_str());
-    mvprintw(row, sep_one_x + 1, "%-*s", avg_width, truncate_text(row_data.avg_hz, avg_width).c_str());
-    mvprintw(
-      row, sep_two_x + 1, "%-*s", minmax_width,
-      truncate_text(row_data.min_max_hz, minmax_width).c_str());
-    mvprintw(
-      row, sep_three_x + 1, "%-*s", missed_width,
-      truncate_text(missed_text, missed_width).c_str());
-    mvprintw(
-      row, sep_four_x + 1, "%-*s", last_recovery_width,
-      truncate_text(row_data.last_recovery_time, last_recovery_width).c_str());
-    mvprintw(
-      row, sep_five_x + 1, "%-*s", average_recovery_width,
-      truncate_text(row_data.avg_recovery_time, average_recovery_width).c_str());
-    mvprintw(
-      row, sep_six_x + 1, "%-*s", bandwidth_width,
-      truncate_text(row_data.bandwidth, bandwidth_width).c_str());
+    for (std::size_t index = 0; index < columns.size(); ++index) {
+      std::string value;
+      if (columns[index] == TopicColumn::Topic) {
+        value = topic_text;
+      } else if (!entry.is_namespace) {
+        switch (columns[index]) {
+          case TopicColumn::Topic: break;
+          case TopicColumn::AverageHz: value = row_data.avg_hz; break;
+          case TopicColumn::MinMaxHz: value = row_data.min_max_hz; break;
+          case TopicColumn::Missed: value = missed_text; break;
+          case TopicColumn::LastRecovery: value = row_data.last_recovery_time; break;
+          case TopicColumn::AverageRecovery: value = row_data.avg_recovery_time; break;
+          case TopicColumn::Bandwidth: value = row_data.bandwidth; break;
+        }
+      }
+      mvprintw(
+        row, column_lefts[index], "%-*s", column_widths[index],
+        truncate_text(value, column_widths[index]).c_str());
+    }
     if (text_color != 0) {
       attroff(COLOR_PAIR(text_color));
     }
     if (selected) {
       apply_role_chgat(row, left, width, kColorSelection);
-      mvaddch(row, sep_one_x, '|');
-      mvaddch(row, sep_two_x, '|');
-      mvaddch(row, sep_three_x, '|');
-      mvaddch(row, sep_four_x, '|');
-      mvaddch(row, sep_five_x, '|');
-      mvaddch(row, sep_six_x, '|');
+      draw_separators(row);
       if (text_color != 0) {
-        apply_role_chgat(row, left, topic_width, text_color);
-        apply_role_chgat(row, sep_one_x + 1, avg_width, text_color);
-        apply_role_chgat(row, sep_two_x + 1, minmax_width, text_color);
-        apply_role_chgat(row, sep_three_x + 1, missed_width, text_color);
-        apply_role_chgat(row, sep_four_x + 1, last_recovery_width, text_color);
-        apply_role_chgat(row, sep_five_x + 1, average_recovery_width, text_color);
-        apply_role_chgat(row, sep_six_x + 1, bandwidth_width, text_color);
+        for (std::size_t index = 0; index < columns.size(); ++index) {
+          apply_role_chgat(row, column_lefts[index], column_widths[index], text_color);
+        }
       }
     }
   }
@@ -623,16 +706,13 @@ void TopicMonitorScreen::draw_topic_detail(int top, int left, int bottom, int ri
 
   const int width = right - left + 1;
   const int visible_rows = std::max(1, bottom - top + 1);
-  const int field_width = std::max(24, width / 2);
-  const int value_width = std::max(16, width - field_width - 1);
+  const auto compact_widths = tui::fit_column_widths(width - 1, {12, 10}, {1, 1});
+  const int field_width = width >= 41 ? std::max(24, width / 2) : compact_widths[0];
+  const int value_width = width >= 41 ? width - field_width - 1 : compact_widths[1];
   const int separator_x = left + field_width;
 
-  if (backend_->selected_detail_index_ < backend_->detail_scroll_) {
-    backend_->detail_scroll_ = backend_->selected_detail_index_;
-  }
-  if (backend_->selected_detail_index_ >= backend_->detail_scroll_ + visible_rows - 1) {
-    backend_->detail_scroll_ = std::max(0, backend_->selected_detail_index_ - visible_rows + 2);
-  }
+  backend_->detail_scroll_ = tui::update_scroll_offset_for_selection(
+    backend_->selected_detail_index_, backend_->detail_scroll_, visible_rows - 1);
 
   attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", field_width, "Field");

@@ -327,13 +327,21 @@ bool NodeCommanderScreen::handle_key(int key) {
     case KEY_RIGHT:
     case 'l':
       if (focus_pane_ == NodeCommanderFocusPane::DetailPane) {
-        return expand_selected_detail_section();
+        const std::size_t previous_line_count = detail_lines_cache_.size();
+        const bool handled = expand_selected_detail_section();
+        tui::request_full_redraw_if_structure_changed(
+          previous_line_count, detail_lines_cache_.size());
+        return handled;
       }
       return true;
     case KEY_LEFT:
     case 'h':
       if (focus_pane_ == NodeCommanderFocusPane::DetailPane) {
-        return collapse_selected_detail_section();
+        const std::size_t previous_line_count = detail_lines_cache_.size();
+        const bool handled = collapse_selected_detail_section();
+        tui::request_full_redraw_if_structure_changed(
+          previous_line_count, detail_lines_cache_.size());
+        return handled;
       }
       return true;
     case '\n':
@@ -806,6 +814,11 @@ void NodeCommanderScreen::draw() {
   int rows = 0;
   int columns = 0;
   getmaxyx(stdscr, rows, columns);
+  if (!tui::terminal_size_supported(rows, columns)) {
+    tui::draw_terminal_size_warning(rows, columns);
+    refresh();
+    return;
+  }
   const auto layout = tui::make_commander_layout(rows, terminal_pane_.visible());
   const int help_row = layout.help_row;
   const int status_row = layout.status_row;
@@ -816,7 +829,9 @@ void NodeCommanderScreen::draw() {
   mvprintw(0, 1, "Node Commander ");
   attroff(theme_attr(kColorTitle));
 
-  const int left_width = std::max(28, (columns - 2) / 3);
+  const int pane_width = columns - 2;
+  const int left_width = tui::fit_split_width(
+    pane_width - 1, std::max(28, pane_width / 3), 14, 12);
   const int separator_x = 1 + left_width;
   draw_node_list(1, 1, content_bottom - 1, separator_x - 1);
   attron(COLOR_PAIR(kColorFrame));
@@ -828,7 +843,7 @@ void NodeCommanderScreen::draw() {
   draw_search_box(layout.pane_rows, columns, search_state_);
   if (help_popup_open_) {
     const int popup_width = std::min(columns - 8, 76);
-    const int popup_height = 18;
+    const int popup_height = std::min(rows - 2, 18);
     const int popup_left = std::max(2, (columns - popup_width) / 2);
     const int popup_top = std::max(1, (rows - popup_height) / 2);
     const int popup_right = popup_left + popup_width - 1;
@@ -858,21 +873,32 @@ void NodeCommanderScreen::draw() {
       mvaddnstr(row, text_left + key_width, description.c_str(), std::max(0, text_width - key_width));
       attroff(COLOR_PAIR(tui::kColorPopup));
     };
-    draw_help_item(popup_top + 2, "Enter", "focus detail pane or open detail item");
-    draw_help_item(popup_top + 3, "Tab", "switch node list and detail pane");
-    draw_help_item(popup_top + 4, "Left/H", "collapse selected detail section");
-    draw_help_item(popup_top + 5, "Right/L", "expand selected detail section");
-    draw_help_item(popup_top + 6, "Alt+S", "search nodes");
-    draw_help_item(popup_top + 7, "F2", "log_viewer");
-    draw_help_item(popup_top + 8, "F3", "topic_monitor");
-    draw_help_item(popup_top + 9, "F4", "parameter_commander (selected node)");
-    draw_help_item(popup_top + 10, "F5", "service_commander (selected node)");
-    draw_help_item(popup_top + 11, "F6", "action_commander");
-    draw_help_item(popup_top + 12, "F7", "tf_monitor");
-    draw_help_item(popup_top + 13, "F8", "urdf_inspector");
-    draw_help_item(popup_top + 14, "F9", "diagnostics_viewer");
-    draw_help_item(popup_top + 15, "Alt+T", "toggle terminal");
-    draw_help_item(popup_top + 16, "Esc/F1", "close help");
+    if (popup_height < 18) {
+      draw_help_item(popup_top + 2, "Enter", "focus detail pane or open detail item");
+      draw_help_item(popup_top + 3, "Tab", "switch node list and detail pane");
+      draw_help_item(popup_top + 4, "Left/H", "collapse selected detail section");
+      draw_help_item(popup_top + 5, "Right/L", "expand selected detail section");
+      draw_help_item(popup_top + 6, "Alt+S", "search nodes");
+      draw_help_item(popup_top + 7, "F2-F9", "open ROS tools");
+      draw_help_item(popup_top + 8, "Alt+T", "toggle terminal");
+      draw_help_item(popup_top + 9, "Esc/F1", "close help");
+    } else {
+      draw_help_item(popup_top + 2, "Enter", "focus detail pane or open detail item");
+      draw_help_item(popup_top + 3, "Tab", "switch node list and detail pane");
+      draw_help_item(popup_top + 4, "Left/H", "collapse selected detail section");
+      draw_help_item(popup_top + 5, "Right/L", "expand selected detail section");
+      draw_help_item(popup_top + 6, "Alt+S", "search nodes");
+      draw_help_item(popup_top + 7, "F2", "log_viewer");
+      draw_help_item(popup_top + 8, "F3", "topic_monitor");
+      draw_help_item(popup_top + 9, "F4", "parameter_commander (selected node)");
+      draw_help_item(popup_top + 10, "F5", "service_commander (selected node)");
+      draw_help_item(popup_top + 11, "F6", "action_commander");
+      draw_help_item(popup_top + 12, "F7", "tf_monitor");
+      draw_help_item(popup_top + 13, "F8", "urdf_inspector");
+      draw_help_item(popup_top + 14, "F9", "diagnostics_viewer");
+      draw_help_item(popup_top + 15, "Alt+T", "toggle terminal");
+      draw_help_item(popup_top + 16, "Esc/F1", "close help");
+    }
   }
   if (terminal_pane_.visible()) {
     terminal_pane_.draw(layout.terminal_top, 0, rows - 1, columns - 1);
@@ -885,12 +911,8 @@ void NodeCommanderScreen::draw_node_list(int top, int left, int bottom, int righ
 
   const int width = right - left + 1;
   const int visible_rows = std::max(1, bottom - top + 1);
-  if (backend_->selected_index_ < backend_->node_scroll_) {
-    backend_->node_scroll_ = backend_->selected_index_;
-  }
-  if (backend_->selected_index_ >= backend_->node_scroll_ + visible_rows - 1) {
-    backend_->node_scroll_ = std::max(0, backend_->selected_index_ - visible_rows + 2);
-  }
+  backend_->node_scroll_ = tui::update_scroll_offset_for_selection(
+    backend_->selected_index_, backend_->node_scroll_, visible_rows - 1);
 
   attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, focus_pane_ == NodeCommanderFocusPane::NodeList ? "Nodes <" : "Nodes");
@@ -922,12 +944,8 @@ void NodeCommanderScreen::draw_detail_pane(int top, int left, int bottom, int ri
   refresh_detail_lines_cache();
 
   const int visible_rows = std::max(1, bottom - top);
-  if (detail_selected_index_ < detail_scroll_) {
-    detail_scroll_ = detail_selected_index_;
-  }
-  if (detail_selected_index_ >= detail_scroll_ + visible_rows) {
-    detail_scroll_ = std::max(0, detail_selected_index_ - visible_rows + 1);
-  }
+  detail_scroll_ = tui::update_scroll_offset_for_selection(
+    detail_selected_index_, detail_scroll_, visible_rows);
 
   attron(theme_attr(kColorHeader));
   mvprintw(top, left, "%-*s", width, focus_pane_ == NodeCommanderFocusPane::DetailPane ? "Details <" : "Details");

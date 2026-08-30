@@ -1226,6 +1226,131 @@ std::string with_terminal_help(const std::string & text, bool terminal_visible) 
   return text.empty() ? suffix : (text + "  " + suffix);
 }
 
+bool terminal_size_supported(int rows, int columns) {
+  return rows >= kMinimumTerminalRows && columns >= kMinimumTerminalColumns;
+}
+
+void request_full_redraw_if_structure_changed(
+  std::size_t previous_item_count, std::size_t current_item_count)
+{
+  if (previous_item_count != current_item_count && stdscr != nullptr) {
+    clearok(stdscr, TRUE);
+  }
+}
+
+int scroll_offset_for_selection(
+  int selected_index, int current_scroll, int visible_item_rows)
+{
+  const int selected = std::max(0, selected_index);
+  const int scroll = std::max(0, current_scroll);
+  const int item_rows = std::max(1, visible_item_rows);
+  if (selected < scroll) {
+    return selected;
+  }
+  if (selected >= scroll + item_rows) {
+    return selected - item_rows + 1;
+  }
+  return scroll;
+}
+
+int update_scroll_offset_for_selection(
+  int selected_index, int current_scroll, int visible_item_rows)
+{
+  const int updated_scroll =
+    scroll_offset_for_selection(selected_index, current_scroll, visible_item_rows);
+  if (updated_scroll != current_scroll && stdscr != nullptr) {
+    clearok(stdscr, TRUE);
+  }
+  return updated_scroll;
+}
+
+void draw_terminal_size_warning(int rows, int columns) {
+  curs_set(0);
+  const std::string title = "Terminal too small";
+  const std::string requirement =
+    "Need " + std::to_string(kMinimumTerminalColumns) + "x" +
+    std::to_string(kMinimumTerminalRows) + "; current " +
+    std::to_string(columns) + "x" + std::to_string(rows);
+
+  const auto draw_centered = [columns](int row, const std::string & text) {
+    if (row < 0 || columns <= 0) {
+      return;
+    }
+    const int width = std::min(columns, static_cast<int>(text.size()));
+    const int left = std::max(0, (columns - width) / 2);
+    mvaddnstr(row, left, text.c_str(), width);
+  };
+
+  draw_centered(std::max(0, rows / 2 - 1), title);
+  if (rows > 1) {
+    draw_centered(std::min(rows - 1, rows / 2 + 1), requirement);
+  }
+}
+
+std::vector<int> fit_column_widths(
+  int available_width,
+  const std::vector<int> & minimum_widths,
+  const std::vector<int> & growth_weights)
+{
+  if (minimum_widths.empty() || minimum_widths.size() != growth_weights.size()) {
+    return {};
+  }
+
+  std::vector<int> widths(minimum_widths.size(), 0);
+  int remaining = std::max(0, available_width);
+  for (std::size_t index = 0; index < widths.size() && remaining > 0; ++index) {
+    widths[index] = 1;
+    --remaining;
+  }
+
+  bool made_progress = true;
+  while (remaining > 0 && made_progress) {
+    made_progress = false;
+    for (std::size_t index = 0; index < widths.size() && remaining > 0; ++index) {
+      const int minimum = std::max(1, minimum_widths[index]);
+      if (widths[index] < minimum) {
+        ++widths[index];
+        --remaining;
+        made_progress = true;
+      }
+    }
+  }
+
+  int total_weight = 0;
+  for (int weight : growth_weights) {
+    total_weight += std::max(0, weight);
+  }
+  while (remaining > 0) {
+    bool distributed = false;
+    if (total_weight > 0) {
+      for (std::size_t index = 0; index < widths.size() && remaining > 0; ++index) {
+        const int share = std::max(0, growth_weights[index]);
+        for (int unit = 0; unit < share && remaining > 0; ++unit) {
+          ++widths[index];
+          --remaining;
+          distributed = true;
+        }
+      }
+    }
+    if (!distributed) {
+      ++widths.front();
+      --remaining;
+    }
+  }
+  return widths;
+}
+
+int fit_split_width(
+  int available_width, int preferred_first_width, int minimum_first_width, int minimum_second_width)
+{
+  if (available_width <= 1) {
+    return std::max(0, available_width);
+  }
+  const int first_minimum = std::clamp(minimum_first_width, 1, available_width - 1);
+  const int first_maximum = std::max(first_minimum, available_width - std::max(1, minimum_second_width));
+  return std::clamp(preferred_first_width, first_minimum, first_maximum);
+}
+
 std::string truncate_text(const std::string & text, int width) {
   if (width <= 0) {
     return "";
